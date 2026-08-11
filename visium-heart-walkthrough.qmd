@@ -1,0 +1,353 @@
+---
+title: "Step-by-step discovery of Visium data analysis using embryonic heart sections."
+author: Raphaël Mauron
+date: today
+format: html
+execute:
+  echo: true
+editor_options:
+  chunk_output_type: console
+
+---
+
+Intro, technology, polyA
+
+## Set up
+
+### Set project library
+
+We start by setting up where the packages we need are etc...
+
+```{r}
+#| label: setup
+#| include: false
+
+.libPaths("/home/raphael.mauron/miniconda3/envs/VisiumHD/lib/R/library") # set project library
+
+.libPaths() # check project library
+
+lapply(.libPaths()[1], list.files) # check library
+```
+
+
+### Load library
+
+```{r}
+#| label: load packages
+
+package.list <- c("semla", "Seurat", "viridis", "dplyr", "ggplot2", "gtools", "patchwork",
+                  "RColorBrewer", "harmony", "tidyverse")
+invisible(lapply(package.list, function(element) {
+  library(element, character.only = TRUE)
+}))
+rm(package.list)
+```
+
+
+### Set seed for project
+
+```{r}
+set.seed(1)
+```
+
+## Loading my first Visium section
+
+To analyse a Visium section, we need to load the data.
+10x Genomics provides a softwares that takes the raw sequences and the microscopy images, 
+and generates a count matrix (gene counts per bacrode), and several files that help us align 
+the microscopy image to the counts data. 
+
+Bellow we create a table that provides the path so R (and specific packages e.g., *semla*)
+knows where these files are. We have here:
+1. `filtered_feature_bc_matrix.h5` : the count data
+2. `tissue_hires_image.png` : an H&E image that can be aligned to the counts
+3. `tissue_positions_list.csv`: a table that contains the info to align the pixel of the image and the Visium spots
+4. `scalefactors_json.json`: a ratio value that help us visualize the image and the spots in the right scale.
+
+### Load data & create infoTable from metadata + spaceranger outs
+
+These are all the paths we want:
+
+```{r}
+data_root_directory <- file.path("./data/spaceranger/V10F24-105_C1")
+
+samples <- Sys.glob(paths = file.path(data_root_directory, "filtered_feature_bc_matrix.h5"))
+imgs <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_hires_image.png"))
+spotfiles <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_positions_list.csv"))
+json <- Sys.glob(paths = file.path(data_root_directory, "spatial", "scalefactors_json.json"))
+```
+
+
+We create a table containing all these paths
+
+```{r}
+infoTable <- tibble(samples,
+                    imgs,
+                    spotfiles,
+                    json)
+```
+
+
+We can now use `ReadVisiumData()` function from *semla* package to create an R-object with all the data we linked with their paths in the `infoTable`. *semla* uses the data structure from the well-known *Seurat* package, originally developed to facilitate the analysis of *single-cell RNA-seq* data. *semla* added, on top of this architecture, all the spatial information (image, coordinates, etc.) that are required for us to know where are the spots and to be able to later use this information in analyses and visualization.
+
+Here we load the data and create an object.
+We also load the image to the object.
+And we will have a look at how things look:
+
+```{r}
+object <- ReadVisiumData(infoTable)
+object <- LoadImages(object)
+object
+```
+
+
+At this stage, we can already use and visualize the data, for instance plotting a gene:
+
+```{r}
+MapFeatures(
+  object = object,
+  layer = "counts",
+  features = "MYH6",
+  pt_size = 3,
+  image_use = "raw"
+)
+```
+
+
+### Question:
+
+1. What is the dimension of the data?
+2. How many spots does that section contain?
+3. How many genes does that section contain?
+4. Does it make sense?
+
+`Hint`: look at the printed object!
+
+
+### Cleaning up a bit...
+
+We see that there are around the double unique genes compared to the number of human protein coding genes.
+Since our data is coming from a poly-A capture technology, every transcripts in the sample 
+that binds to a poly-T will be sequenced and counted. Among the extra things, there are some transcripts that we won't want to keep:
+
+- Hemoglobin genes (raison)
+- Mitochondrial genes (raison)
+- ribosomal genes (raison)
+- MALAT1 gene (raison)
+
+In *R*, we can use simple `regular expression` (text patterns that match) to retrieve these genes:
+
+```{r}
+undesirable_genes <- grep(pattern = c("^MT-|^HB|^RP|MALAT1"), x = rownames(object), value = T)
+
+undesirable_genes <- setdiff(undesirable_genes, c("HBEGF", "HBP1")) # we want to keep that Growth factor and transcription factor
+
+undesirable_genes
+```
+
+
+We can get a list of all the other genes (that we want to keep), and see the difference compared to the original object.
+
+```{r}
+genes_to_keep <- setdiff(rownames(object), undesirable_genes)
+length(rownames(object)) - length(genes_to_keep)
+```
+
+
+Now we can proceed with a first filtering:
+
+```{r}
+object <- SubsetSTData(object, features = genes_to_keep)
+object
+```
+
+
+### More systematic filtering
+
+The extra transcripts we sequence and gather in our object do not limit itself to the 4 categories we succesfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories.
+Here, we will use the  *GRCh38-2020-A genome reference* which let us figure out the main categories our biomolecules belongs too.
+
+The *GRCh38-2020-A genome reference* is quite large so here we provide a smaller size of that reference that you can load in the next chunk. This chunk commented out is for you to see what has been done.
+
+```{r}
+#| eval: false
+
+# package that help us load large files
+library(rtracklayer)
+
+# import the 
+gtf <- import("/srv/home/10x_references/refdata-gex-GRCh38-2020-A/genes/genes.gtf")
+
+unique(gtf$type)
+# [1] gene           transcript     exon           CDS            start_codon   
+# [6] stop_codon     UTR            Selenocysteine
+
+annot <- gtf[gtf$type %in% c("gene")] |>
+  mcols() |>
+  as.data.frame() |>
+  dplyr::select(gene_id, gene_name, gene_type) |>
+  dplyr::distinct()
+
+saveRDS(annot, "./data/GRCh38-2020-A_gene_biotypes.rds")
+```
+
+
+Here we load the lighter version of the reference genome:
+
+```{r}
+annot <- readRDS("./data/GRCh38-2020-A_gene_biotypes.rds")
+head(annot)
+unique(annot$gene_type)
+```
+
+
+Here we will use the information of the gene types to keep only the protein coding genes.
+This step is project dependent, in other cases you might want to also keep the long-non-coding RNA or any types of immunoglobuline transcripts.
+
+```{r}
+# subset the reference genes to only the protein coding genes
+annot_protein_coding <- subset(annot, gene_type == "protein_coding")
+
+# fetch the gene names from our object that are annotated as protein coding genes in the reference genome
+genes_to_keep_2 <- intersect(rownames(object), annot_protein_coding$gene_name)
+
+# use the same subset idea as before
+object <- SubsetSTData(object, features = genes_to_keep_2)
+object
+```
+
+
+We can now see that our object significantly decrease. We can have a quick look at what genes are now present in our object:
+
+```{r}
+head(rownames(object), 20)
+```
+
+
+### Make sure I have all the data working
+
+```{r}
+MapFeatures(
+  object = object,
+  layer = "counts",
+  features = "MYH6",
+  pt_size = 3,
+  image_use = "raw"
+)
+```
+
+### Processing
+
+The data colleceted by the array and sequenced after library sequencing are proned to
+technical errors. This raw data is called "counts" in a Seurat or semla object.
+We need to correct for difference in gene sequence (ScaleData), and in spot differences (NormilizeData).
+
+We checked before by printing the outlook of the object, that we have only the raw counts from after the
+spaceranger run.
+
+```{r}
+object
+```
+
+Now, we will need to multiple steps:
+
+1. Normalize the counts (place holder for the explanation: correct for the gene variance per spot)
+2. Scale the data (place holder for explanation why we do that. We use these scale data when further dimensionality reduction with PCA)
+
+```{r}
+object <- NormalizeData(object = object)
+object <- ScaleData(object = object)
+```
+
+We see the difference already by plotting the same gene using the count or the data layer:
+
+```{r}
+p1 <- MapFeatures(
+  object = object,
+  slot = "counts", # Here we use the non-normalized & unscaled layer
+  features = "MYH6",
+  pt_size = 3,
+  image_use = "raw"
+)
+
+p2 <- MapFeatures(
+  object = object,
+  slot = "data", # Here we use the normalized and sclaed layer
+  features = "MYH6",
+  pt_size = 3,
+  image_use = "raw"
+)
+
+p <- p1 | p2
+p
+```
+
+3. Restrict the gene space by only the top variable genes (place holder formula from FindVariableFeatures)
+4. Perform Principal Component Analysis (PCA) using the variable genes
+
+```{r}
+object <- FindVariableFeatures(object = object, nfeatures = 3000)
+object <- RunPCA(object)
+```
+
+## Now we will do the same but with 3 sections
+
+### Load data & create infoTable from metadata + spaceranger outs
+
+```{r}
+data_root_directory <- file.path("./data/spaceranger/*")
+metadata <- read.csv("./data/metadata.csv")
+
+samples <- Sys.glob(paths = file.path(data_root_directory, "filtered_feature_bc_matrix.h5"))
+imgs <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_hires_image.png"))
+spotfiles <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_positions_list.csv"))
+json <- Sys.glob(paths = file.path(data_root_directory, "spatial", "scalefactors_json.json"))
+```
+
+```{r}
+infoTable <- tibble(samples,
+                    imgs,
+                    spotfiles,
+                    json,
+                    slide_id = list.files(path = "./data/spaceranger/"),
+                    sample_id = list.files(path = "./data/spaceranger/"),
+                    organ = metadata$organ,
+                    organism = metadata$organism,
+                    age = metadata$pcw_age,
+                    sex = metadata$sex)
+
+rm(data_root_directory, samples, imgs, spotfiles, json)
+```
+
+### Create semla object & Load images onto object
+
+```{r}
+object_3sect <- ReadVisiumData(infoTable)
+object_3sect <- LoadImages(object_3sect, image_height = 1931)
+object_3sect
+
+rm(infoTable)
+gc()
+```
+
+### Plot H&E before transformation
+
+```{r}
+#| eval: false
+
+ImagePlot(object_3sect)
+```
+
+```{r}
+MapFeatures(
+  object = object_3sect,
+  slot = "counts",
+  features = "MYH6",
+  pt_size = 3,
+  image_use = "raw"
+)
+```
+
+```{r}
+
+```
