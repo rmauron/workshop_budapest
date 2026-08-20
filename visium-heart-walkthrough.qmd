@@ -107,7 +107,7 @@ At this stage, we can already use and visualize the data, for instance plotting 
 MapFeatures(
   object = object,
   layer = "counts",
-  features = "MYH6",
+  features = "MYH6", # <-- place to enter a gene name
   pt_size = 3,
   image_use = "raw"
 )
@@ -138,10 +138,13 @@ that binds to a poly-T will be sequenced and counted. Among the extra things, th
 In *R*, we can use simple `regular expression` (text patterns that match) to retrieve these genes:
 
 ```{r}
+# find al the genes that correspond to mt, hb, rp and malat
 undesirable_genes <- grep(pattern = c("^MT-|^HB|^RP|MALAT1"), x = rownames(object), value = T)
 
-undesirable_genes <- setdiff(undesirable_genes, c("HBEGF", "HBP1")) # we want to keep that Growth factor and transcription factor
+# remove two genes that correspond to our search but that we want to keep (growth factor & transcription factor)
+undesirable_genes <- setdiff(undesirable_genes, c("HBEGF", "HBP1"))
 
+# check the list of undesirable genes
 undesirable_genes
 ```
 
@@ -154,7 +157,8 @@ length(rownames(object)) - length(genes_to_keep)
 ```
 
 
-Now we can proceed with a first filtering:
+Now we can proceed with a first filtering. We want to remove the undesirable genes, meaning we want to keep only all the other genes.
+We use the function `SubsetSTData()` from the *semla* package, which ensure that the spatial information is also modified correctly.
 
 ```{r}
 object <- SubsetSTData(object, features = genes_to_keep)
@@ -224,16 +228,25 @@ head(rownames(object), 20)
 ```
 
 
-### Make sure I have all the data working
+### Even more filtering
+
+We now cleaned the genes that we are not interested in.
+We can now analyse the distributions of these genes with the commonly used histograms, but also spatially.
 
 ```{r}
-MapFeatures(
-  object = object,
-  layer = "counts",
-  features = "MYH6",
-  pt_size = 3,
-  image_use = "raw"
-)
+# check within the object more in details, we see the metadata
+head(object@meta.data)
+```
+
+`nFeature_Spatial` = number of unique genes
+`nCount_Spatial` = total number of counts (a genes can be present multiple times)
+
+```{r}
+p1 <- hist(object@meta.data$nFeature_Spatial)
+p2 <- MapFeatures(object = object, features = "nFeature_Spatial", layer = "counts")
+
+p <- p1 | p2
+p
 ```
 
 ### Processing
