@@ -320,20 +320,23 @@ p
 
 ### Processing
 
-The data colleceted by the array and sequenced after library sequencing are proned to
+The data collected by the array and sequenced after library sequencing are proned to
 biological and technical variations. 
 This raw data is called "counts" in a `Seurat` object.
 We need to correct for differences in gene sequences (ScaleData), and in spot differences (NormilizeData) so that the expression is comparable across sample, spots and genes.
 
 We checked before by printing the outlook of the object, that we have only the raw counts from after the `spaceranger` run.
 
-Now, we will need to multiple steps:
+Now, we will need to go through multiple steps:
 
 
 #### 1. Normalization
 
 Normalize the counts (the amount of RNA and UMIs differ between spots (cells in case of single-cell RNA-seq)). The normalization is done per spot and is a log1p of a per spot scaled count.
 
+Formula:
+
+normalized count = log1p(((raw count/total counts for that spot)*10000) + 1)
 
 
 ```{r}
@@ -368,18 +371,43 @@ p
 
 #### 2. Find variable features
 
-Restrict the gene space by only the top variable genes (place holder formula from FindVariableFeatures)
+Some of the downstream prcessing are relatively computing costly, so we gain
+from restricting the gene space to only the genes that are the most variable
+across spots. Excluding the invariable genes help for:
+- Improved signal-to-noise ratio
+- Reduced computational requirements
 
-Excluding invariable genes that do not contribute
-informative/interesting information
-– Improved signal -to- noise ratio
-– Reduced computational requirements
+Using the `Seurat` suite, we can do that easily by using the function
+`FindVariableFeatures()`. That function fits a line to the relationship
+between the log(variance) and the log(mean) using the local polynomial regression
+(loess) per gene.
 
+```{r}
+# Find the top 3000 variable features
+object_norm <- FindVariableFeatures(
+  object_norm, 
+  selection.method = "vst", 
+  nfeatures = 3000
+)
+# Generate the scatter plot (Black = non-variable, Red = top 3000 variable)
+p1 <- VariableFeaturePlot(object_norm, cols = c("black", "red"))
+
+# Add gene labels for the top 10 genes
+p_final <- LabelPoints(
+  plot = p1, 
+  points = head(VariableFeatures(object_norm), 10), 
+  repel = TRUE,
+  xnudge = 0,
+  ynudge = 0
+)
+suppressWarnings(print(p_final))
+```
 
 
 #### 3. Scaling
 
-The scaling correspond to a Z-score transformation which is performed on the normalized count (after normalization step), and is applied per gene (and not per spot).
+The scaling correspond to a Z-score transformation which is performed on the 
+normalized count (after normalization step), and is applied per gene (and not per spot).
 
 Formula:
 Z = (x - mu) / sigma
@@ -392,29 +420,140 @@ Scaled data have a mean of 0 and a variance of 1. That means that some genes hav
 This scaled data is used mainly when we want to further reduce dimension using PCA.
 
 ```{r}
-object_scaled <- ScaleData(object = object_norm)
+# let's assign the scaled data again to our variable called object. We will then have all the layers on the same object.
+object <- ScaleData(object = object_norm)
 ```
 
-We see the difference already by plotting the same gene using the count or the data slot:
+Now we can inspect the `object` again:
 
 ```{r}
+object
+```
 
+### Question:
+
+1. How many layers of data do we have in our object now?
+2. Which ones?
+3. What each of these layers correspond to?
+
+That is all the transformation that we will perform on our data.
+Let's visualize how different the same gene can look on the different layers;
+
+```{r}
+p1 <- MapFeatures(object = object,
+                  features = "MYH6",
+                  slot = "counts")
+p2 <- MapFeatures(object = object,
+                  features = "MYH6",
+                  slot = "scale.data")
+p3 <- MapFeatures(object = object,
+                  features = "MYH6",
+                  slot = "data")
+
+p <- p1 | p2 | p3
 ```
 
 
-#### 4. Principal Component Analysis
+These 3 steps allowed us to correct for sequencing depths difference in genes and in spots.
+We found the genes that have the most amount of variance in the data (the genes that do not
+change in space in our section are not the most interesting), and scaled the data for PCA.
 
-Perform Principal Component Analysis (PCA) using the variable genes
+
+### Clustering
+
+Our data is now ready for downstream analysis. While we could explore individual genes 
+of interest, a state-of-the-art approach borrowed from single-cell RNA-seq is cluster 
+analysis. The primary goal of clustering is to group data points based on overall similarity. 
+In spatial transcriptomics, we group spots that share similar gene expression profiles, 
+which helps differentiate spots corresponding to distinct anatomical structures or cellular 
+microenvironments.
+
+It is again a multi-step processes:
+
+1. Principal Componenent Analysis (PCA)
+2. Find the neighbors & Build graph
+3. Find the clusters
+4. Visualize the clusters on a UMAP embedding
+5. Visualize the clusters on the tissue section
+6. Differentially Expressed Genes (DEG)
+
+#### 1. Principal Component Analysis (PCA)
+
+PCA is a data-simplification technique. Instead of tracking 3000 individual 
+genes across every spot, PCA groups together genes that behave similarly, genes
+telling the same story. This condenses 3000 separate measurements into a few 
+master trends (Principal Components) that still capture the main biological 
+differences in our sample.
+
+The `RunPCA()` function from `Seurat` allows us to do this easily. The function
+will use the `scale.data` layer under the hood, and use only the top 3000 genes.
 
 ```{r}
-object <- FindVariableFeatures(object = object, nfeatures = 3000)
 object <- RunPCA(object)
 ```
 
-This 4 steps allowed us to correct for sequencing depths difference in genes and in spots.
-We found the genes that have the most amount of variance in the data (the genes that do not
-change in space in our section are not the most interesting), and performed PCA.
-PCA tries to get the top variable genes, and tries to 
+```{r}
+p <- ElbowPlot(object = object,
+               ndims = 50,
+               reduction = "pca",
+               plot_type = "variance"
+               )
+p
+```
+
+#### 2. Find the neighbors & Build graph
+
+Calculate distances between spots in PCA space to construct a Shared Nearest Neighbor (SNN) graph.
+
+```{r}
+object <- FindNeighbors(object = object, reduction = "pca", dims = 1:20)
+```
+
+
+#### 3. Find the clusters
+
+Partition the SNN graph into distinct groups using community detection algorithms (e.g., Louvain or Leiden).
+
+```{r}
+object <- FindClusters(object = object, resolution = 1)
+```
+
+
+#### 4. Visualize the clusters on a UMAP embedding
+
+Project the clusters onto a 2D layout to inspect global relationships.
+
+```{r}
+object <- RunUMAP(object = object,
+                  reduction = "pca",
+                  dims = 1:20,
+                  seed.use = 42
+                  )
+```
+
+```{r}
+p <- DimPlot(object = object, 
+             reduction = "umap", 
+             group.by = "seurat_clusters")
+p
+```
+
+
+#### 5. Visualize the clusters on the tissue section
+
+Overlay cluster colors directly onto the histology image to verify anatomical alignment.
+
+```{r}
+p <- MapLabels(object = object,
+               column_name = "seurat_clusters")
+p
+```
+
+
+#### 6. Differentially Expressed Genes (DEG)
+
+Identify signature marker genes unique to each identified cluster.
+
 
 
 
