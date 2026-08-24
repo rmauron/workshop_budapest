@@ -7,31 +7,19 @@ execute:
   echo: true
 editor_options:
   chunk_output_type: console
-
 ---
 
+In this workshop, we will discover the data analysis of Visium data from 10x Genomics. All the code is provided, so you are not asked to code it yourself, but rather read thoroughly the steps that help us load the data, filter the data, process it, cluster. In a second time, if time allow, all the steps are repeated for use case with 3 tissue sections, where complementary and more advanced analyses are suggested. If the time does not allow us to do it together, you are welcome to go through it by yourself and contact me later for questions.
 
-In this workshop, we will discover the data analysis of Visium data from 10x Genomics.
-All the code is provided, so you are not asked to code it yourself, but rather read 
-toroughly the steps that help us load the data, filter the data, process it, cluster.
-In a second time, if time allow, all the steps are repeated for use case with 3 tissue
-sections, where complementary and more advanced analyses are suggested.
-If the time does not allow us to do it together, you are welcome to go through it by
-yourself and contact me later for questions.
+The data is collected following the poly-A capture technology from 10x Genomics. On the plot below is a reminder:
 
-The data is collected following the poly-A capture technology from 10x Genomics. On the 
-plot below is a reminder:
-
-
+![Visium Poly-A](./data/img/10x_visium_poly_A.jpeg)
 
 ## Set up
 
 ### Set project library
 
-When working in R, there is multiple ways to set up your working environment. For the 
-sake of that workshop, you are provided with a fully working environment that contains
-the code, the data, and the R packages already installed. Below we are just specifying
-R where to look for the installed packages.
+When working in R, there is multiple ways to set up your working environment. For the sake of that workshop, you are provided with a fully working environment that contains the code, the data, and the R packages already installed. Below we are just specifying R where to look for the installed packages.
 
 ```{r}
 #| label: setup
@@ -44,19 +32,9 @@ R where to look for the installed packages.
 lapply(.libPaths()[1], list.files) # check library
 ```
 
-
 ### Load library
 
-R packages might be installed, but for us to be able to use them later in the analysis,
-we have to attach them to our session. In R, we do it by using the `library()` function.
-This slightly more advanced way below, allow to call the function `library()` in a loop.
-You could also do:
-`
-library(semla)
-library(Seurat)
-etc.
-`
-This works equally well.
+R packages might be installed, but for us to be able to use them later in the analysis, we have to attach them to our session. In R, we do it by using the `library()` function. This slightly more advanced way below, allow to call the function `library()` in a loop. You could also do: `library(semla) library(Seurat) etc.` This works equally well.
 
 ```{r}
 #| label: load packages
@@ -69,60 +47,40 @@ invisible(lapply(package.list, function(element) {
 rm(package.list)
 ```
 
-
 ### Set seed for project
 
-Sometimes, some code and functions rely on some random drawing of numbers.
-For instance, if I tell R to sample 100 random cells from my single-cell RNA-seq data,
-everytime I run the function, I will have different randomly picked cells. It does what
-we ask, but for the sake of reproducibility, we want to have always the same cells picked
-when we run the same code the next day. To do so, we can specify a seed by using `set.seed()`.
-Some functions have that option in the function's parameter (worth checking because it might
-not be used by default), but otherwise you can use `set.seed()` with any number you want 
-**in the code chunk where you need it**.
+Sometimes, some code and functions rely on some random drawing of numbers. For instance, if I tell R to sample 100 random cells from my single-cell RNA-seq data, everytime I run the function, I will have different randomly picked cells. It does what we ask, but for the sake of reproducibility, we want to have always the same cells picked when we run the same code the next day. To do so, we can specify a seed by using `set.seed()`. Some functions have that option in the function's parameter (worth checking because it might not be used by default), but otherwise you can use `set.seed()` with any number you want **in the code chunk where you need it**.
 
 ```{r}
 set.seed(1)
 ```
 
-
 ## Loading my first Visium section
-Our session is now fully ready to start. We have the packages loaded, we are ready to load
-some data.
 
-To analyse a [Visium](https://www.10xgenomics.com/platforms/visium/product-family?&utm_medium=search&src=search&utm_source=google&lss=google&utm_term=10x%20visium&useroffertype=website-page&utm_content=website-page&utm_campaign=701KW0000019A9zYAE&cnm=701KW0000019A9zYAE&cid=701KW0000019A9zYAE&usercampaignid=701KW0000019A9zYAE&gad_source=1) section, we need to load the data.
-[10x Genomics](https://www.10xgenomics.com/) provides a software ([spaceranger](https://www.10xgenomics.com/support/software/space-ranger/latest)) that takes the raw sequences and the microscopy images, 
-and generates a `count matrix` (gene counts per barcode), and several files that help us align 
-the microscopy image to the count matrix.
+Our session is now fully ready to start. We have the packages loaded, we are ready to load some data.
 
+To analyse a [Visium](https://www.10xgenomics.com/platforms/visium/product-family?&utm_medium=search&src=search&utm_source=google&lss=google&utm_term=10x%20visium&useroffertype=website-page&utm_content=website-page&utm_campaign=701KW0000019A9zYAE&cnm=701KW0000019A9zYAE&cid=701KW0000019A9zYAE&usercampaignid=701KW0000019A9zYAE&gad_source=1) section, we need to load the data. [10x Genomics](https://www.10xgenomics.com/) provides a software ([spaceranger](https://www.10xgenomics.com/support/software/space-ranger/latest)) that takes the raw sequences and the microscopy images, and generates a `count matrix` (gene counts per barcode), and several files that help us align the microscopy image to the count matrix.
 
 ### How do we load this count matrix in R?
-In R, scientists have developed convenience packages to effortlessly load the `spaceranger`
-outputs, store them into an object class, and provide multiple functions to analyse, plot and else.
 
-In the single-cell RNA seq world, such a convenience package is `Seurat`, and is very well established
-and maintained by a large team. They are at the origin of the object class that we call `Seurat object`.
+In R, scientists have developed convenience packages to effortlessly load the `spaceranger` outputs, store them into an object class, and provide multiple functions to analyse, plot and else.
 
-When Spatial Transcriptomics appeared, there were no such toolkit, so other labs put effort into creating
-such a package. Today we will rely on the [`semla`](https://github.com/spatial-research/semla) package
-developed in our lab ([Lundeberg](https://www.spatialresearch.org/)).
-`semla`, under the hood, uses the `Seurat object` class, but added a way to register the spatial information
-that single-cell data do not have (image, coordinates, etc.).
+In the single-cell RNA seq world, such a convenience package is `Seurat`, and is very well established and maintained by a large team. They are at the origin of the object class that we call `Seurat object`.
+
+When Spatial Transcriptomics appeared, there were no such toolkit, so other labs put effort into creating such a package. Today we will rely on the [`semla`](https://github.com/spatial-research/semla) package developed in our lab ([Lundeberg](https://www.spatialresearch.org/)). `semla`, under the hood, uses the `Seurat object` class, but added a way to register the spatial information that single-cell data do not have (image, coordinates, etc.).
 
 In the next steps, most functions we will use come from either `semla` or `Seurat`.
 
-
 ### Load data & create infoTable from metadata + spaceranger outs
+
 Let's start!
 
-Below we create a table that provides the path so R (and specific packages e.g., *semla*)
-knows where the `spaceranger outputs` are. We have here:
+Below we create a table that provides the path so R (and specific packages e.g., *semla*) knows where the `spaceranger outputs` are. We have here:
 
-1. `filtered_feature_bc_matrix.h5` : the count data
-2. `tissue_hires_image.png` : an H&E image that can be aligned to the counts
-3. `tissue_positions_list.csv`: a table that contains the info to align the pixel of the image and the Visium spots
-4. `scalefactors_json.json`: a ratio value that help us visualize the image and the spots in the right scale.
-
+1.  `filtered_feature_bc_matrix.h5` : the count data
+2.  `tissue_hires_image.png` : an H&E image that can be aligned to the counts
+3.  `tissue_positions_list.csv`: a table that contains the info to align the pixel of the image and the Visium spots
+4.  `scalefactors_json.json`: a ratio value that help us visualize the image and the spots in the right scale.
 
 ```{r}
 data_root_directory <- file.path("./data/spaceranger/V10F24-105_C1")
@@ -133,7 +91,6 @@ spotfiles <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_
 json <- Sys.glob(paths = file.path(data_root_directory, "spatial", "scalefactors_json.json"))
 ```
 
-
 We create a table containing all these paths
 
 ```{r}
@@ -143,13 +100,11 @@ infoTable <- tibble(samples,
                     json)
 ```
 
-
 We can inspect the table:
 
 ```{r}
 infoTable
 ```
-
 
 We can now use `ReadVisiumData()` function from *semla* package to create an R-object with all the data we linked with their paths in the `infoTable`. *semla* uses the data structure from the well-known *Seurat* package, originally developed to facilitate the analysis of *single-cell RNA-seq* data. *semla* added, on top of this architecture, all the spatial information (image, coordinates, etc.) that are required for us to know where are the spots and to be able to later use this information in analyses and visualization.
 
@@ -158,23 +113,20 @@ object <- ReadVisiumData(infoTable)
 object <- LoadImages(object) #we specify semla to load the image in the object
 ```
 
-
 Let's inspect what we have so far.
 
 ```{r}
 object
 ```
 
-
 ### Question:
 
-1. What is the dimension of the data?
-2. How many spots does that section contain?
-3. How many genes does that section contain?
-4. Does it make sense?
+1.  What is the dimension of the data?
+2.  How many spots does that section contain?
+3.  How many genes does that section contain?
+4.  Does it make sense?
 
 `Hint`: look at the printed object!
-
 
 At this stage, we can already use and visualize the data, for instance plotting a gene:
 
@@ -188,33 +140,18 @@ MapFeatures(
 )
 ```
 
-
-
-
 ### Cleaning up a bit...
 
-We see about twice as many unique genes as there are human protein-coding genes. Our data
-comes from poly-A capture, so every polyadenylated transcript gets sequenced — including a
-lot we did not set out to measure.
+We see about twice as many unique genes as there are human protein-coding genes. Our data comes from poly-A capture, so every polyadenylated transcript gets sequenced — including a lot we did not set out to measure.
 
-Four families are worth removing. All are very highly expressed, so they eat a large share
-of each spot's counts, and all vary for reasons unrelated to the anatomy we want to map:
+Four families are worth removing. All are very highly expressed, so they eat a large share of each spot's counts, and all vary for reasons unrelated to the anatomy we want to map:
 
-- **Hemoglobin (HB*)** — an embryonic heart is full of blood, and erythrocytes are packed
-  with hemoglobin transcripts. Keep them and our clusters will report how much blood a spot
-  contains rather than what tissue it is.
-- **Mitochondrial (MT-)** — only 13 genes, but extremely abundant. In heart they track
-  muscle density and metabolic state, and they also rise with RNA degradation across the
-  slide. Technical gradient mixed with global cell state.
-- **Ribosomal proteins (RPL*, RPS*)** — ~80 housekeeping genes, tightly correlated, often
-  10–25% of a spot's counts. They move as a block and can dominate the first principal
-  component with "ribosome content".
-- **MALAT1** — a single nuclear lncRNA, often the most-detected feature of all. How much we
-  capture depends mostly on permeabilisation, so it reads out the experiment more than the
-  biology.
+-   **Hemoglobin (HB*)** — an embryonic heart is full of blood, and erythrocytes are packed with hemoglobin transcripts. Keep them and our clusters will report how much blood a spot contains rather than what tissue it is.
+-   **Mitochondrial (MT-)** — only 13 genes, but extremely abundant. In heart they track muscle density and metabolic state, and they also rise with RNA degradation across the slide. Technical gradient mixed with global cell state.
+-   **Ribosomal proteins (RPL*, RPS*)** — \~80 housekeeping genes, tightly correlated, often 10–25% of a spot's counts. They move as a block and can dominate the first principal component with "ribosome content".
+-   **MALAT1** — a single nuclear lncRNA, often the most-detected feature of all. How much we capture depends mostly on permeabilisation, so it reads out the experiment more than the biology.
 
-This is a project-specific choice, not a rule: if you studied erythropoiesis, hemoglobin
-would be your signal, not your noise.
+This is a project-specific choice, not a rule: if you studied erythropoiesis, hemoglobin would be your signal, not your noise.
 
 In *R*, we can use simple `regular expression` or called `regex`(text patterns that match) to retrieve these genes:
 
@@ -238,7 +175,6 @@ grep("^HB|^RP|^MT-", setdiff(rownames(object), undesirable_genes), value = TRUE)
 undesirable_genes
 ```
 
-
 We can get a list of all the other genes (the ones we want to keep), and see the difference compared to the original object.
 
 ```{r}
@@ -248,32 +184,24 @@ length(rownames(object)) - length(genes_to_keep)
 
 ### Question:
 
-1. How many genes is there already that we want to filter out?
+1.  How many genes is there already that we want to filter out?
 
-
-Now we can proceed with a first filtering. We want to remove the undesirable genes, meaning we want to keep only all the other genes.
-We use the function `SubsetSTData()` from the *semla* package, which ensure that the spatial information is also modified correctly.
+Now we can proceed with a first filtering. We want to remove the undesirable genes, meaning we want to keep only all the other genes. We use the function `SubsetSTData()` from the *semla* package, which ensure that the spatial information is also modified correctly.
 
 ```{r}
 object <- SubsetSTData(object, features = genes_to_keep)
 object
 ```
 
-Note that when using `SubsetSTData()` we assigned the result of the function to the same original
-name `object`. That action overwrites the previous state of our object. In case you want to keep
-the unfiltered and filtered together, should assign the result of the function to a different
-variable name.
+Note that when using `SubsetSTData()` we assigned the result of the function to the same original name `object`. That action overwrites the previous state of our object. In case you want to keep the unfiltered and filtered together, should assign the result of the function to a different variable name.
 
 ### More systematic filtering
 
-The extra transcripts we sequence and gather in our object do not limit itself to the 4 categories we successfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories.
-Here, we will use the  *GRCh38-2020-A genome reference* which let us figure out the main categories our biomolecules belongs too.
+The extra transcripts we sequence and gather in our object do not limit itself to the 4 categories we successfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories. Here, we will use the *GRCh38-2020-A genome reference* which let us figure out the main categories our biomolecules belongs too.
 
-The complete *GRCh38-2020-A genome reference* is quite large so here we provide the single file of that reference that you can load in the next chunk. 
+The complete *GRCh38-2020-A genome reference* is quite large so here we provide the single file of that reference that you can load in the next chunk.
 
-*You do not need to run the next chunk*
-This chunk commented out is for you to see what has been done from the complete reference to get the 
-file we will use next.
+*You do not need to run the next chunk* This chunk commented out is for you to see what has been done from the complete reference to get the file we will use next.
 
 ```{r}
 #| eval: false
@@ -297,7 +225,6 @@ annot <- gtf[gtf$type %in% c("gene")] |>
 saveRDS(annot, "./data/GRCh38-2020-A_gene_biotypes.rds")
 ```
 
-
 Here we load the lighter version of the reference genome:
 
 ```{r}
@@ -306,9 +233,7 @@ head(annot)
 unique(annot$gene_type)
 ```
 
-
-Here we will use the information of the gene types to keep only the protein coding genes.
-This step is project dependent, in other cases you might want to also keep the long-non-coding RNA or any types of immunoglobulin transcripts.
+Here we will use the information of the gene types to keep only the protein coding genes. This step is project dependent, in other cases you might want to also keep the long-non-coding RNA or any types of immunoglobulin transcripts.
 
 ```{r}
 # subset the reference genes to only the protein coding genes
@@ -327,27 +252,24 @@ object$nFeature_Spatial <- colSums(LayerData(object, "counts") > 0)
 object
 ```
 
-
 We can now see that our object size significantly decreased.
 
 ### Question:
 
-1. What is the dimension of the data now?
-2. How many genes are we going to work with now?
-
+1.  What is the dimension of the data now?
+2.  How many genes are we going to work with now?
 
 ### Some QC plots
 
-We now cleaned the genes that we are not interested in.
-We can now analyse the distributions of these genes with the commonly used histograms, but also spatially.
+We now cleaned the genes that we are not interested in. We can now analyse the distributions of these genes with the commonly used histograms, but also spatially.
 
 ```{r}
 # check within the object more in details, we see the metadata
 head(object@meta.data)
 ```
 
-`nFeature_Spatial` = number of unique genes
-`nCount_Spatial` = total number of counts (a genes can be present multiple times)
+- `nFeature_Spatial` = number of unique genes 
+- `nCount_Spatial` = total number of counts (a genes can be present multiple times)
 
 ```{r}
 p1 <- ggplot(object@meta.data, aes(nCount_Spatial)) + geom_histogram()
@@ -357,9 +279,7 @@ p <- p1 | p2
 p
 ```
 
-
-We could decide to remove all spots that have less than a certain number of genes since
-the section we analyse could have holes or empty regions.
+We could decide to remove all spots that have less than a certain number of genes since the section we analyse could have holes or empty regions.
 
 We would do it by running:
 
@@ -381,9 +301,7 @@ p
 # object2 <- SubsetSTData(object, spots = spots_to_keep)
 ```
 
-
-Before we continue with the processing, we just need to make sure that no spots contains
-exactly 0 count. That would produces `NaN` in some function, then breaking others.
+Before we continue with the processing, we just need to make sure that no spots contains exactly 0 count. That would produces `NaN` in some function, then breaking others.
 
 Check:
 
@@ -392,20 +310,13 @@ sum(object$nCount_Spatial == 0) # check that no spots have 0 counts
 all(object$nCount_Spatial == colSums(LayerData(object, "counts"))) # check that the metadata is the same data as the layer counts
 ```
 
-
 ### Processing
 
-The data collected by the array and sequenced after library sequencing are prone to
-biological and technical variations. 
-This raw data is called "counts" in a `Seurat` object.
-We need to correct for differences in gene sequences, a per-gene z-score so no gene
-dominates the PCA, (`ScaleData()`), and in spot differences (`NormalizeData()`) so that the
-expression is comparable across sample, spots and genes.
+The data collected by the array and sequenced after library sequencing are prone to biological and technical variations. This raw data is called "counts" in a `Seurat` object. We need to correct for differences in gene sequences, a per-gene z-score so no gene dominates the PCA, (`ScaleData()`), and in spot differences (`NormalizeData()`) so that the expression is comparable across sample, spots and genes.
 
 We checked before by printing the outlook of the object, that we have only the raw counts from after the `spaceranger` run.
 
 Now, we will need to go through multiple steps:
-
 
 #### 1. Normalization
 
@@ -415,20 +326,26 @@ Formula:
 
 normalized count = log1p(count / total_counts × 10000)
 
-
 ```{r}
 object_norm <- NormalizeData(object = object)
 ```
 
-
 ```{r}
-p1 <- ggplot(object@meta.data, aes(nCount_Spatial)) + geom_histogram() # distribution of the total number of molecule/spot before normalization
-p2 <- ggplot(object_norm@meta.data, aes(nCount_Spatial)) + geom_histogram() # distribution of the total number of molecule/spot after normalization
+gene <- "MYH6"
+
+p1 <- ggplot(data.frame(x = LayerData(object, "counts")[gene, ]), aes(x)) +
+  geom_histogram(bins = 50) +
+  labs(title = paste(gene, "- raw counts"), x = "count per spot")
+
+p2 <- ggplot(data.frame(x = LayerData(object_norm, "data")[gene, ]), aes(x)) +
+  geom_histogram(bins = 50) +
+  labs(title = paste(gene, "- normalized"), x = "log-normalized value")
+
 
 p3 <- MapFeatures(
   object = object,
   slot = "counts", # Here we use the non-normalized & unscaled layer
-  features = "MYH6", #total number of molecules per spot
+  features = gene,
   pt_size = 3,
   image_use = "raw"
 )
@@ -436,7 +353,7 @@ p3 <- MapFeatures(
 p4 <- MapFeatures(
   object = object_norm,
   slot = "data", # Here we use the normalized and scaled layer
-  features = "MYH6", #total number of molecules per spot
+  features = gene,
   pt_size = 3,
   image_use = "raw"
 )
@@ -445,19 +362,14 @@ p <- (p1 | p3) / (p2 | p4)
 p
 ```
 
-
 #### 2. Find variable features
 
-Some of the downstream processing are relatively computing costly, so we gain
-from restricting the gene space to only the genes that are the most variable
-across spots. Excluding the invariable genes help for:
-- Improved signal-to-noise ratio
+Some of the downstream processing are relatively computing costly, so we gain from restricting the gene space to only the genes that are the most variable across spots. Excluding the invariable genes help for: 
+
+- Improved signal-to-noise ratio 
 - Reduced computational requirements
 
-Using the `Seurat` suite, we can do that easily by using the function
-`FindVariableFeatures()`. That function fits a line to the relationship
-between the log(variance) and the log(mean) using the local polynomial regression
-(loess) per gene.
+Using the `Seurat` suite, we can do that easily by using the function `FindVariableFeatures()`. That function fits a line to the relationship between the log(variance) and the log(mean) using the local polynomial regression (loess) per gene.
 
 ```{r}
 # Find the top 3000 variable features
@@ -480,21 +392,17 @@ p_final <- LabelPoints(
 suppressWarnings(print(p_final))
 ```
 
-
 #### 3. Scaling
 
-The scaling correspond to a Z-score transformation which is performed on the 
-normalized count (after normalization step), and is applied per gene (and not per spot).
+The scaling correspond to a Z-score transformation which is performed on the normalized count (after normalization step), and is applied per gene (and not per spot).
 
-Formula:
-Z = (x - mu) / sigma
+Formula: Z = (x - mu) / sigma
 
-x: normalized count
-mu: mean expression of the gene we normalize
-sigma: standard deviation of the gene we normalize
+- x: normalized count 
+- mu: mean expression of the gene we normalize 
+- sigma: standard deviation of the gene we normalize
 
-Scaled data have a mean of 0 and a variance of 1. That means that some genes have positive values and some are negative. 
-This scaled data is used mainly when we want to further reduce dimension using PCA.
+Scaled data have a mean of 0 and a variance of 1. That means that some genes have positive values and some are negative. This scaled data is used mainly when we want to further reduce dimension using PCA.
 
 ```{r}
 # let's assign the scaled data again to our variable called object. We will then have all the layers on the same object.
@@ -509,12 +417,11 @@ object
 
 ### Question:
 
-1. How many layers of data do we have in our object now?
-2. Which ones?
-3. What each of these layers correspond to?
+1.  How many layers of data do we have in our object now?
+2.  Which ones?
+3.  What each of these layers correspond to?
 
-That is all the transformation that we will perform on our data.
-Let's visualize how different the same gene can look on the different layers;
+That is all the transformation that we will perform on our data. Let's visualize how different the same gene can look on the different layers;
 
 ```{r}
 p1 <- MapFeatures(object = object,
@@ -531,40 +438,26 @@ p <- p1 | p2 | p3
 p
 ```
 
-
-These 3 steps allowed us to correct for sequencing depths difference in genes and in spots.
-We found the genes that have the most amount of variance in the data (the genes that do not
-change in space in our section are not the most interesting), and scaled the data for PCA.
-
+These 3 steps allowed us to correct for sequencing depths difference in genes and in spots. We found the genes that have the most amount of variance in the data (the genes that do not change in space in our section are not the most interesting), and scaled the data for PCA.
 
 ### Clustering
 
-Our data is now ready for downstream analysis. While we could explore individual genes 
-of interest, a state-of-the-art approach borrowed from single-cell RNA-seq is cluster 
-analysis. The primary goal of clustering is to group data points based on overall similarity. 
-In spatial transcriptomics, we group spots that share similar gene expression profiles, 
-which helps differentiate spots corresponding to distinct anatomical structures or cellular 
-microenvironments.
+Our data is now ready for downstream analysis. While we could explore individual genes of interest, a state-of-the-art approach borrowed from single-cell RNA-seq is cluster analysis. The primary goal of clustering is to group data points based on overall similarity. In spatial transcriptomics, we group spots that share similar gene expression profiles, which helps differentiate spots corresponding to distinct anatomical structures or cellular microenvironments.
 
 It is again a multi-step processes:
 
-1. Principal Component Analysis (PCA)
-2. Find the neighbors & Build graph
-3. Find the clusters
-4. Visualize the clusters on a UMAP embedding
-5. Visualize the clusters on the tissue section
-6. Differentially Expressed Genes (DEG)
+1.  Principal Component Analysis (PCA)
+2.  Find the neighbors & Build graph
+3.  Find the clusters
+4.  Visualize the clusters on a UMAP embedding
+5.  Visualize the clusters on the tissue section
+6.  Differentially Expressed Genes (DEG)
 
 #### 1. Principal Component Analysis (PCA)
 
-PCA is a data-simplification technique. Instead of tracking 3000 individual 
-genes across every spot, PCA groups together genes that behave similarly, genes
-telling the same story. This condenses 3000 separate measurements into a few 
-master trends (Principal Components) that still capture the main biological 
-differences in our sample.
+PCA is a data-simplification technique. Instead of tracking 3000 individual genes across every spot, PCA groups together genes that behave similarly, genes telling the same story. This condenses 3000 separate measurements into a few master trends (Principal Components) that still capture the main biological differences in our sample.
 
-The `RunPCA()` function from `Seurat` allows us to do this easily. The function
-will use the `scale.data` layer under the hood, and use only the top 3000 genes.
+The `RunPCA()` function from `Seurat` allows us to do this easily. The function will use the `scale.data` layer under the hood, and use only the top 3000 genes.
 
 ```{r}
 object <- RunPCA(object)
@@ -579,21 +472,17 @@ p <- ElbowPlot(object = object,
 p
 ```
 
-
 #### 2. Find the neighbors & Build graph
 
-Calculate distances between spots in PCA space to construct a Shared Nearest Neighbor (SNN) graph.
-In that example, we decide to take the first 20 principal components.
+Calculate distances between spots in PCA space to construct a Shared Nearest Neighbor (SNN) graph. In that example, we decide to take the first 20 principal components.
 
 ```{r}
 object <- FindNeighbors(object = object, reduction = "pca", dims = 1:20)
 ```
 
-
 #### 3. Find the clusters
 
-Partition the SNN graph into distinct groups using community detection algorithms (e.g., Louvain or Leiden).
-You see that there is a `resolution` parameter for the `FindClusters()` function. 
+Partition the SNN graph into distinct groups using community detection algorithms (e.g., Louvain or Leiden). You see that there is a `resolution` parameter for the `FindClusters()` function.
 
 ```{r}
 object <- FindClusters(object = object, 
@@ -601,16 +490,9 @@ object <- FindClusters(object = object,
                        resolution = 1) #higher number gets more clusters
 ```
 
-
 #### 4. Visualize the clusters on a UMAP embedding
 
-Project the clusters onto a 2D layout to inspect global relationships.
-Here we want to visualize each of our spots as clusters that we just computed.
-So we take the first 20 principal components from our PCA analysis, and project
-them in a 2D space using the **Uniform Manifold Approximation and Projection (UMAP)**,
-"a popular data science tool used for machine learning and data visualization. 
-It shrinks complex information with many variables down into a simple 2D or 3D picture."
-
+Project the clusters onto a 2D layout to inspect global relationships. Here we want to visualize each of our spots as clusters that we just computed. So we take the first 20 principal components from our PCA analysis, and project them in a 2D space using the **Uniform Manifold Approximation and Projection (UMAP)**, "a popular data science tool used for machine learning and data visualization. It shrinks complex information with many variables down into a simple 2D or 3D picture."
 
 ```{r}
 object <- RunUMAP(object = object,
@@ -620,10 +502,7 @@ object <- RunUMAP(object = object,
                   )
 ```
 
-
-Once UMAP is ran, we can visualize the results in a scatter plot. We need 
-to specify the `metadata` column that contains the label of our clusters.
-In that case, we use the column called `seurat_clusters`.
+Once UMAP is ran, we can visualize the results in a scatter plot. We need to specify the `metadata` column that contains the label of our clusters. In that case, we use the column called `seurat_clusters`.
 
 ```{r}
 p <- DimPlot(object = object, 
@@ -631,7 +510,6 @@ p <- DimPlot(object = object,
              group.by = "seurat_clusters")
 p
 ```
-
 
 #### 5. Visualize the clusters on the tissue section
 
@@ -643,18 +521,11 @@ p <- MapLabels(object = object,
 p
 ```
 
-
 #### 6. Differentially Expressed Genes (DEG)
 
-We would like now to identify which genes are the most specific to each
-of the clusters we identified. To do so we use an analysis method called
-`Differentially Expressed Genes` or `DEG`.
+We would like now to identify which genes are the most specific to each of the clusters we identified. To do so we use an analysis method called `Differentially Expressed Genes` or `DEG`.
 
-We rely mainly on the `FindAllMarkers()` function from the `Seurat` package.
-If you check the function documentation online, you can find out about the different 
-test that one can choose from. We will use the default `Wilcoxon test`. The function
-accounts for the multiple testing. After running the test, we will explore quickly
-its results.
+We rely mainly on the `FindAllMarkers()` function from the `Seurat` package. If you check the function documentation online, you can find out about the different test that one can choose from. We will use the default `Wilcoxon test`. The function accounts for the multiple testing. After running the test, we will explore quickly its results.
 
 ```{r}
 # Set identity to the clustering column corresponding to the current resolution
@@ -673,9 +544,7 @@ detable <- FindAllMarkers(object,
 print(head(detable))
 ```
 
-We can see that the results is a dataframe containing several metrics in the columns such
-as the average log fold change (avg_log2FC) or the adjusted p-values (p_val_adj), but also
-the name of the genes and the clusters it belongs to.
+We can see that the results is a dataframe containing several metrics in the columns such as the average log fold change (avg_log2FC) or the adjusted p-values (p_val_adj), but also the name of the genes and the clusters it belongs to.
 
 Let's find out more:
 
@@ -684,23 +553,18 @@ dim(detable)
 detable |> filter(gene == "MYH6")
 ```
 
-
-We can see that the dimension of the table is quite large, which means that some genes appear in multiple
-clusters.
-We also see that when checking all the rows that contain the gene `MYH6`.
+We can see that the dimension of the table is quite large, which means that some genes appear in multiple clusters. We also see that when checking all the rows that contain the gene `MYH6`.
 
 We will see in a second how we can visualize these results easily.
 
 But first, we want to filter these results and add some more metrics
 
-
-```{r} 
+```{r}
 # Filter and add extra columns
 detable <- detable[detable$p_val_adj < 0.05, ] #keep only the rows that have an adjusted p-val smaller than 0.05
 detable$pct.diff <- detable$pct.1 - detable$pct.2 # add a column called "pct.diff" which is the difference in percentage 1 (%age of spots expressing that gene in cluster of interest) and percentage 2 (%age of spots expressing that gene in all other clusters). We can think that the largest the pct.diff, the more specific the gene is to that cluster.
 detable$log.pct.diff <- log2((detable$pct.1 * 99 + 1) / (detable$pct.2 * 99 + 1)) #calculate the log of the pct.diff
 ```
-
 
 Then we can select the top5 markers per clusters
 
@@ -713,10 +577,9 @@ top5 <- detable |>
   top_n(5, avg_log2FC)
 ```
 
-
 And finally visualize it
 
-```{r} 
+```{r}
 # Generate a dot plot for the selected genes with a title indicating the grid info
 plts <- DotPlot(object, features = unique(top5 |> pull(gene)), assay = "Spatial") +
   coord_flip() +
@@ -730,12 +593,10 @@ plts <- DotPlot(object, features = unique(top5 |> pull(gene)), assay = "Spatial"
 plts
 ```
 
-
-
 ## Self exploration
 
-1. Among the genes from the list, do you recognize some genes?
-2. Are all the genes specific to their clusters?
+1.  Among the genes from the list, do you recognize some genes?
+2.  Are all the genes specific to their clusters?
 
 ```{r}
 top2 <- top5 |>
@@ -746,6 +607,8 @@ MapFeatures(object = object,
             features = unique(top2$gene),
             ncol = 6)
 ```
+
+
 
 
 
@@ -781,35 +644,159 @@ infoTable <- tibble(samples,
 rm(data_root_directory, samples, imgs, spotfiles, json)
 ```
 
-### Create semla object & Load images onto object
+
 
 ```{r}
-object_3sect <- ReadVisiumData(infoTable)
-object_3sect <- LoadImages(object_3sect, image_height = 400)
-object_3sect
+# ---------------------------------------------------------------------------
+# Full pipeline, 3 sections. Same steps as above, run end to end.
+# ---------------------------------------------------------------------------
 
-rm(infoTable)
-gc()
+set.seed(1)
+
+## 1. Build infoTable -------------------------------------------------------
+# Join metadata on sample_id rather than trusting that file order matches CSV
+# row order — otherwise sections can silently get the wrong age.
+
+metadata <- read.csv("./data/metadata.csv")
+
+samples   <- Sys.glob("./data/spaceranger/*/filtered_feature_bc_matrix.h5")
+imgs      <- Sys.glob("./data/spaceranger/*/spatial/tissue_hires_image.png")
+spotfiles <- Sys.glob("./data/spaceranger/*/spatial/tissue_positions_list.csv")
+json      <- Sys.glob("./data/spaceranger/*/spatial/scalefactors_json.json")
+
+stopifnot(length(samples) == length(imgs),
+          length(samples) == length(spotfiles),
+          length(samples) == length(json))
+
+infoTable <- tibble(samples, imgs, spotfiles, json) |>
+  mutate(sample_id = basename(dirname(samples)),
+         slide_id  = sample_id) |>
+  left_join(metadata, by = "sample_id")     # <-- adjust key to your CSV
+
+stopifnot(!any(is.na(infoTable$pcw_age)))
+print(infoTable)                            # eyeball before loading
 ```
 
-### Plot H&E before transformation
 
 ```{r}
-#| eval: false
-
-ImagePlot(object_3sect)
+## 2. Load ------------------------------------------------------------------
+se <- ReadVisiumData(infoTable)
+se <- LoadImages(se, image_height = 400)
 ```
 
+
 ```{r}
-MapFeatures(
-  object = object_3sect,
-  slot = "counts",
-  features = "MYH6",
-  pt_size = 3,
-  image_use = "raw"
+## 3. Gene filtering --------------------------------------------------------
+pattern <- paste0(
+  "^MT-",
+  "|^HB[ABDEGMQZ][0-9]?$",
+  "|^RP[LS][0-9]+[A-Z]?[0-9]?$|^RPL36AL$|^RPLP[0-9]$|^RPSA$",
+  "|^MALAT1$"
 )
+
+undesirable_genes <- setdiff(grep(pattern, rownames(se), value = TRUE), "RPL3L")
+annot             <- readRDS("./data/GRCh38-2020-A_gene_biotypes.rds")
+protein_coding    <- subset(annot, gene_type == "protein_coding")$gene_name
+
+genes_to_keep <- setdiff(rownames(se), undesirable_genes) |> intersect(protein_coding)
+se <- SubsetSTData(se, features = genes_to_keep)
+
+# metadata is NOT refreshed by subsetting — recompute it
+se$nCount_Spatial   <- colSums(LayerData(se, "counts"))
+se$nFeature_Spatial <- colSums(LayerData(se, "counts") > 0)
+
+stopifnot(sum(se$nCount_Spatial == 0) == 0)
+se
 ```
 
-```{r}
 
+```{r}
+## 4. Per-section QC --------------------------------------------------------
+ggplot(se@meta.data, aes(nCount_Spatial, fill = sample_id)) +
+  geom_histogram(bins = 50) +
+  facet_wrap(~ sample_id, scales = "free_y") +
+  labs(title = "Library size per spot, by section")
+
+MapFeatures(se, features = "nCount_Spatial", pt_size = 1.5)
+```
+
+
+```{r}
+## 5. Processing ------------------------------------------------------------
+se <- NormalizeData(se)
+se <- FindVariableFeatures(se, selection.method = "vst", nfeatures = 3000)
+se <- ScaleData(se)
+se <- RunPCA(se, npcs = 50)
+
+ElbowPlot(se, ndims = 50, reduction = "pca", plot_type = "variance")
+```
+
+
+```{r}
+## 6. Batch correction ------------------------------------------------------
+# Three sections were captured on different slides, so part of what separates
+# them is technical. Harmony adjusts the PCA embedding so that spots group by
+# biology rather than by slide. Run the clustering below BOTH ways and compare:
+# if clusters split perfectly by sample_id on "pca", that split is batch.
+
+se <- harmony::RunHarmony(se, group.by.vars = "sample_id",
+                          reduction = "pca", reduction.save = "harmony")
+
+reduction_use <- "harmony"    # switch to "pca" to see the uncorrected version
+dims_use      <- 1:20
+```
+
+
+```{r}
+## 7. Clustering ------------------------------------------------------------
+se <- FindNeighbors(se, reduction = reduction_use, dims = dims_use)
+se <- FindClusters(se, algorithm = 1, resolution = 0.8)
+se <- RunUMAP(se, reduction = reduction_use, dims = dims_use, seed.use = 42)
+
+DimPlot(se, reduction = "umap", group.by = "seurat_clusters") |
+  DimPlot(se, reduction = "umap", group.by = "sample_id")
+
+MapLabels(se, column_name = "seurat_clusters", pt_size = 1.5)
+```
+
+
+```{r}
+## 8. Cluster markers -------------------------------------------------------
+se <- SetIdent(se, value = "seurat_clusters")
+
+detable <- FindAllMarkers(se,
+                          only.pos = TRUE,
+                          max.cells.per.ident = 300,
+                          logfc.threshold = 0.1,
+                          assay = "Spatial",
+                          test.use = "wilcox",
+                          min.pct = 0.05)
+
+detable <- detable |>
+  filter(p_val_adj < 0.05) |>
+  mutate(pct.diff = pct.1 - pct.2)
+
+# slice_* rather than top_n: p_val_adj has many exact ties at 0
+top5 <- detable |>
+  group_by(cluster) |>
+  slice_min(p_val_adj, n = 20, with_ties = FALSE) |>
+  slice_max(pct.diff,  n = 10, with_ties = FALSE) |>
+  slice_max(avg_log2FC, n = 5, with_ties = FALSE) |>
+  ungroup()
+
+DotPlot(se, features = unique(top5$gene), assay = "Spatial") +
+  coord_flip() +
+  scale_color_gradientn(colours = rev(RColorBrewer::brewer.pal(11, "RdBu"))) +
+  scale_x_discrete(limits = rev) +
+  labs(x = "", y = "", title = "Cluster markers across 3 sections")
+```
+
+
+```{r}
+## 9. Checkpoint ------------------------------------------------------------
+dir.create("./checkpoints", showWarnings = FALSE)
+saveRDS(se,      "./checkpoints/3sections_clustered.rds")
+saveRDS(detable, "./checkpoints/3sections_markers.rds")
+
+# se <- readRDS("./checkpoints/3sections_clustered.rds")
 ```
