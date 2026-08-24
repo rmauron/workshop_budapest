@@ -10,7 +10,19 @@ editor_options:
 
 ---
 
-Intro, technology, polyA
+
+In this workshop, we will discover the data analysis of Visium data from 10x Genomics.
+All the code is provided, so you are not asked to code it yourself, but rather read 
+toroughly the steps that help us load the data, filter the data, process it, cluster.
+In a second time, if time allow, all the steps are repeated for use case with 3 tissue
+sections, where complementary and more advanced analyses are suggested.
+If the time does not allow us to do it together, you are welcome to go through it by
+yourself and contact me later for questions.
+
+The data is collected following the poly-A capture technology from 10x Genomics. On the 
+plot below is a reminder:
+
+
 
 ## Set up
 
@@ -307,6 +319,11 @@ genes_to_keep_2 <- intersect(rownames(object), annot_protein_coding$gene_name)
 
 # use the same subset idea as before
 object <- SubsetSTData(object, features = genes_to_keep_2)
+
+# correct metadata after subset
+object$nCount_Spatial   <- colSums(LayerData(object, "counts"))
+object$nFeature_Spatial <- colSums(LayerData(object, "counts") > 0)
+
 object
 ```
 
@@ -333,8 +350,8 @@ head(object@meta.data)
 `nCount_Spatial` = total number of counts (a genes can be present multiple times)
 
 ```{r}
-p1 <- ggplot(object@meta.data, aes(nFeature_Spatial)) + geom_histogram()
-p2 <- MapFeatures(object = object, features = "nFeature_Spatial", slot = "counts")
+p1 <- ggplot(object@meta.data, aes(nCount_Spatial)) + geom_histogram()
+p2 <- MapFeatures(object = object, features = "nCount_Spatial", slot = "counts")
 
 p <- p1 | p2
 p
@@ -342,7 +359,7 @@ p
 
 
 We could decide to remove all spots that have less than a certain number of genes since
-the section we analyse could have wholes or empty regions.
+the section we analyse could have holes or empty regions.
 
 We would do it by running:
 
@@ -350,17 +367,18 @@ We would do it by running:
 # Define thresholds for each subset object (adjust the values as needed)
 threshold <- 1000
 
-spots_to_keep <- names(object$nCount_Spatial[object$nCount_Spatial > threshold])
-object$spots_to_keep <- object$nCount_Spatial > threshold
+object$to_keep <- factor(ifelse(object$nCount_Spatial > threshold, "keep", "drop"))
+sum(object$to_keep == "drop")
 
 
 p <- MapLabels(
   object = object,
-  column_name = "spots_to_keep"
+  column_name = "to_keep"
 )
 p
 
-#object2 <- SubsetSTData(object, spots = spots_to_keep)
+# spots_to_keep <- names(object$nCount_Spatial[object$nCount_Spatial > threshold])
+# object2 <- SubsetSTData(object, spots = spots_to_keep)
 ```
 
 
@@ -370,7 +388,8 @@ exactly 0 count. That would produces `NaN` in some function, then breaking other
 Check:
 
 ```{r}
-sum(object$nCount_Spatial == 0)
+sum(object$nCount_Spatial == 0) # check that no spots have 0 counts
+all(object$nCount_Spatial == colSums(LayerData(object, "counts"))) # check that the metadata is the same data as the layer counts
 ```
 
 
@@ -379,7 +398,9 @@ sum(object$nCount_Spatial == 0)
 The data collected by the array and sequenced after library sequencing are prone to
 biological and technical variations. 
 This raw data is called "counts" in a `Seurat` object.
-We need to correct for differences in gene sequences (ScaleData), and in spot differences (NormalizeData) so that the expression is comparable across sample, spots and genes.
+We need to correct for differences in gene sequences, a per-gene z-score so no gene
+dominates the PCA, (`ScaleData()`), and in spot differences (`NormalizeData()`) so that the
+expression is comparable across sample, spots and genes.
 
 We checked before by printing the outlook of the object, that we have only the raw counts from after the `spaceranger` run.
 
@@ -685,10 +706,10 @@ Then we can select the top5 markers per clusters
 
 ```{r}
 # Select top genes by p_val_adj, pct.diff and avg_log2FC
-top5 <- detable %>% 
-  group_by(cluster) %>% 
-  top_n(-20, p_val_adj) %>% 
-  top_n(10, pct.diff) %>% 
+top5 <- detable |> 
+  group_by(cluster) |> 
+  top_n(-20, p_val_adj) |> 
+  top_n(10, pct.diff) |> 
   top_n(5, avg_log2FC)
 ```
 
@@ -697,10 +718,10 @@ And finally visualize it
 
 ```{r} 
 # Generate a dot plot for the selected genes with a title indicating the grid info
-plts <- DotPlot(object, features = unique(top5 %>% pull(gene)), assay = "Spatial") +
+plts <- DotPlot(object, features = unique(top5 |> pull(gene)), assay = "Spatial") +
   coord_flip() +
   theme(axis.text.y = element_text(angle = 0, hjust = 1, vjust = 0.5)) +
-  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n = 11, name = "RdBu") %>% rev()) +
+  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n = 11, name = "RdBu") |> rev()) +
   scale_x_discrete(limits = rev) +
   scale_y_discrete() +
   labs(x = "", y = "", title = "Dot Plot of spatial clusters") +
@@ -764,7 +785,7 @@ rm(data_root_directory, samples, imgs, spotfiles, json)
 
 ```{r}
 object_3sect <- ReadVisiumData(infoTable)
-object_3sect <- LoadImages(object_3sect, image_height = 1931)
+object_3sect <- LoadImages(object_3sect, image_height = 400)
 object_3sect
 
 rm(infoTable)
