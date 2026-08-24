@@ -501,9 +501,11 @@ p <- ElbowPlot(object = object,
 p
 ```
 
+
 #### 2. Find the neighbors & Build graph
 
 Calculate distances between spots in PCA space to construct a Shared Nearest Neighbor (SNN) graph.
+In that example, we decide to take the first 20 principal components.
 
 ```{r}
 object <- FindNeighbors(object = object, reduction = "pca", dims = 1:20)
@@ -513,15 +515,24 @@ object <- FindNeighbors(object = object, reduction = "pca", dims = 1:20)
 #### 3. Find the clusters
 
 Partition the SNN graph into distinct groups using community detection algorithms (e.g., Louvain or Leiden).
+You see that there is a `resolution` parameter for the `FindClusters()` function. 
 
 ```{r}
-object <- FindClusters(object = object, resolution = 1)
+object <- FindClusters(object = object, 
+                       algorithm = 1, #1 = original Louvain algorithm
+                       resolution = 1) #higher number gets more clusters
 ```
 
 
 #### 4. Visualize the clusters on a UMAP embedding
 
 Project the clusters onto a 2D layout to inspect global relationships.
+Here we want to visualize each of our spots as clusters that we just computed.
+So we take the first 20 principal compenents from our PCA analysis, and project
+them in a 2D space using the **Uniform Manifold Approximation and Projection (UMAP)**,
+"a popular data science tool used for machine learning and data visualization. 
+It shrinks complex information with many variables down into a simple 2D or 3D picture."
+
 
 ```{r}
 object <- RunUMAP(object = object,
@@ -530,6 +541,11 @@ object <- RunUMAP(object = object,
                   seed.use = 42
                   )
 ```
+
+
+Once UMAP is ran, we can visualize the results in a scatter plot. We need 
+to specify the `metadata` column that contains the label of our clusters.
+In that case, we use the column called `seurat_clusters`.
 
 ```{r}
 p <- DimPlot(object = object, 
@@ -552,7 +568,107 @@ p
 
 #### 6. Differentially Expressed Genes (DEG)
 
-Identify signature marker genes unique to each identified cluster.
+We would like now to identify which genes are the most specific to each
+of the clusters we identified. To do so we use an analysis method called
+`Differentially Expressed Genes` or `DEG`.
+
+We rely mainly on the `FindAllMarkers()` function from the `Seurat` package.
+If you check the function documentation online, you can find out about the different 
+test that one can choose from. We will the default `Wilcoxon test`. The function
+accounts for the multiple testing. After running the test, we will explore quickly
+its results.
+
+```{r}
+# Set identity to the clustering column corresponding to the current resolution
+object <- SetIdent(object, value = "seurat_clusters")
+  
+# Differential expression analysis
+detable <- FindAllMarkers(object,
+                          only.pos = TRUE,
+                          max.cells.per.ident = 300,
+                          logfc.threshold = 0.1,
+                          assay = "Spatial",
+                          test.use = "wilcox",
+                          min.pct = 0.05)
+  
+# Optionally, print a glimpse of the markers table
+print(head(detable))
+```
+
+We can see that the results is a dataframe containing several metrics in the columns such
+as the average log fold change (avg_log2FC) or the adjusted p-values (p_val_adj), but also
+the name of the genes and the clusters it belongs to.
+
+Let's find out more:
+
+```{r}
+dim(detable)
+detable |> filter(gene == "MYH6")
+```
+
+
+We can see that the dimension of the table is quite large, which means that some genes appear in multiple
+clusters.
+We also see that when checking all the rows that contain the gene `MYH6`.
+
+We will see in a second how we can visualize these results easily.
+
+But first, we want to filter these results and add some more metrics
+
+
+```{r} 
+# Filter and add extra columns
+detable <- detable[detable$p_val_adj < 0.05, ] #keep only the rows that have an adjusted p-val smaller than 0.05
+detable$pct.diff <- detable$pct.1 - detable$pct.2 # add a column called "pct.diff" which is the difference in percentage 1 (%age of spots expressing that gene in cluster of interest) and percentage 2 (%age of spots expressing that gene in all other clusters). We can think that the largest the pct.diff, the more specific the gene is to that cluster.
+detable$log.pct.diff <- log2((detable$pct.1 * 99 + 1) / (detable$pct.2 * 99 + 1)) #calculate the log of the pct.diff
+```
+
+
+Then we can select the top5 markers per clusters
+
+```{r}
+# Select top genes by p_val_adj, pct.diff and avg_log2FC
+top5 <- detable %>% 
+  group_by(cluster) %>% 
+  top_n(-20, p_val_adj) %>% 
+  top_n(10, pct.diff) %>% 
+  top_n(5, avg_log2FC)
+```
+
+
+And finally visualize it
+
+```{r} 
+# Generate a dot plot for the selected genes with a title indicating the grid info
+plts <- DotPlot(object, features = unique(top5 %>% pull(gene)), assay = "Spatial") +
+  coord_flip() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1, vjust = 0.5)) +
+  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n = 11, name = "RdBu") %>% rev()) +
+  scale_x_discrete(limits = rev) +
+  scale_y_discrete() +
+  labs(x = "", y = "", title = "Dot Plot of spatial clusters") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+  
+plts
+```
+
+
+
+## Self exploration
+
+1. Among the genes from the list, do you recognize some genes?
+2. Are all the genes specific to their clusters?
+
+```{r}
+top2 <- top5 |>
+  group_by(cluster) |>
+  top_n(-2, p_val_adj)
+
+MapFeatures(object = object,
+            features = top2$gene,
+            ncol = 6)
+```
+
 
 
 
