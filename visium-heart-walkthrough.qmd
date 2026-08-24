@@ -19,7 +19,7 @@ Intro, technology, polyA
 When working in R, there is multiple ways to set up your working environment. For the 
 sake of that workshop, you are provided with a fully working environment that contains
 the code, the data, and the R packages already installed. Below we are just specifying
-R where to look for the installed pacakges.
+R where to look for the installed packages.
 
 ```{r}
 #| label: setup
@@ -80,20 +80,20 @@ some data.
 
 To analyse a [Visium](https://www.10xgenomics.com/platforms/visium/product-family?&utm_medium=search&src=search&utm_source=google&lss=google&utm_term=10x%20visium&useroffertype=website-page&utm_content=website-page&utm_campaign=701KW0000019A9zYAE&cnm=701KW0000019A9zYAE&cid=701KW0000019A9zYAE&usercampaignid=701KW0000019A9zYAE&gad_source=1) section, we need to load the data.
 [10x Genomics](https://www.10xgenomics.com/) provides a software ([spaceranger](https://www.10xgenomics.com/support/software/space-ranger/latest)) that takes the raw sequences and the microscopy images, 
-and generates a `count matrix` (gene counts per bacrode), and several files that help us align 
+and generates a `count matrix` (gene counts per barcode), and several files that help us align 
 the microscopy image to the count matrix.
 
 
 ### How do we load this count matrix in R?
-In R, developpers have developped convenience packages to effortlessly load the `spaceranger`
+In R, scientists have developed convenience packages to effortlessly load the `spaceranger`
 outputs, store them into an object class, and provide multiple functions to analyse, plot and else.
 
 In the single-cell RNA seq world, such a convenience package is `Seurat`, and is very well established
 and maintained by a large team. They are at the origin of the object class that we call `Seurat object`.
 
-When Spatial Transcriptomics appeared, they were no such toolkit, so other labs put effort into creating
+When Spatial Transcriptomics appeared, there were no such toolkit, so other labs put effort into creating
 such a package. Today we will rely on the [`semla`](https://github.com/spatial-research/semla) package
-developped in our lab ([Lundeberg](https://www.spatialresearch.org/)).
+developed in our lab ([Lundeberg](https://www.spatialresearch.org/)).
 `semla`, under the hood, uses the `Seurat object` class, but added a way to register the spatial information
 that single-cell data do not have (image, coordinates, etc.).
 
@@ -181,23 +181,46 @@ MapFeatures(
 
 ### Cleaning up a bit...
 
-We see that there are around the double unique genes compared to the number of human protein coding genes.
-Since our data is coming from a poly-A capture technology, every transcripts in the sample 
-that binds to a poly-T will be sequenced and counted. Among the extra things, there are some transcripts that we won't want to keep:
+We see about twice as many unique genes as there are human protein-coding genes. Our data
+comes from poly-A capture, so every polyadenylated transcript gets sequenced — including a
+lot we did not set out to measure.
 
-- Hemoglobin genes (raison)
-- Mitochondrial genes (raison)
-- ribosomal genes (raison)
-- MALAT1 gene (raison)
+Four families are worth removing. All are very highly expressed, so they eat a large share
+of each spot's counts, and all vary for reasons unrelated to the anatomy we want to map:
+
+- **Hemoglobin (HB*)** — an embryonic heart is full of blood, and erythrocytes are packed
+  with hemoglobin transcripts. Keep them and our clusters will report how much blood a spot
+  contains rather than what tissue it is.
+- **Mitochondrial (MT-)** — only 13 genes, but extremely abundant. In heart they track
+  muscle density and metabolic state, and they also rise with RNA degradation across the
+  slide. Technical gradient mixed with global cell state.
+- **Ribosomal proteins (RPL*, RPS*)** — ~80 housekeeping genes, tightly correlated, often
+  10–25% of a spot's counts. They move as a block and can dominate the first principal
+  component with "ribosome content".
+- **MALAT1** — a single nuclear lncRNA, often the most-detected feature of all. How much we
+  capture depends mostly on permeabilisation, so it reads out the experiment more than the
+  biology.
+
+This is a project-specific choice, not a rule: if you studied erythropoiesis, hemoglobin
+would be your signal, not your noise.
 
 In *R*, we can use simple `regular expression` or called `regex`(text patterns that match) to retrieve these genes:
 
 ```{r}
-# find al the genes that correspond to mt, hb, rp and malat1
-undesirable_genes <- grep(pattern = c("^MT-|^HB|^RP|MALAT1"), x = rownames(object), value = T)
+pattern <- paste0(
+  "^MT-",                      # 13 mitochondrial genes: MT-ND*, MT-CO*, MT-ATP*, MT-CYB
+  "|^HB[ABDEGMQZ][0-9]?$",     # HBA1/2, HBB, HBD, HBE1, HBG1/2, HBM, HBQ1, HBZ — not HBEGF, HBP1, HBS1L
+  "|^RP[LS][0-9]+[A-Z]?[0-9]?$|^RPL36AL$|^RPLP[0-9]$|^RPSA$", # ~85 ribosomal proteins — not the RPS6K kinases
+  "|^MALAT1$"                  # nuclear lncRNA, often the single most-detected feature
+)
 
-# remove two genes that correspond to our search but that we want to keep (growth factor & transcription factor)
-undesirable_genes <- setdiff(undesirable_genes, c("HBEGF", "HBP1"))
+undesirable_genes <- grep(pattern, rownames(object), value = TRUE)
+undesirable_genes <- setdiff(undesirable_genes, "RPL3L")   # muscle-specific paralog, real cardiac marker
+
+length(undesirable_genes)   # 110
+
+# check nothing was missed
+grep("^HB|^RP|^MT-", setdiff(rownames(object), undesirable_genes), value = TRUE)
 
 # check the list of undesirable genes
 undesirable_genes
@@ -226,12 +249,12 @@ object
 
 Note that when using `SubsetSTData()` we assigned the result of the function to the same original
 name `object`. That action overwrites the previous state of our object. In case you want to keep
-the unfiltered and filtered together, should should assign the result of the function to a different
+the unfiltered and filtered together, should assign the result of the function to a different
 variable name.
 
 ### More systematic filtering
 
-The extra transcripts we sequence and gather in our object do not limit itself to the 4 categories we succesfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories.
+The extra transcripts we sequence and gather in our object do not limit itself to the 4 categories we successfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories.
 Here, we will use the  *GRCh38-2020-A genome reference* which let us figure out the main categories our biomolecules belongs too.
 
 The complete *GRCh38-2020-A genome reference* is quite large so here we provide the single file of that reference that you can load in the next chunk. 
@@ -273,7 +296,7 @@ unique(annot$gene_type)
 
 
 Here we will use the information of the gene types to keep only the protein coding genes.
-This step is project dependent, in other cases you might want to also keep the long-non-coding RNA or any types of immunoglobuline transcripts.
+This step is project dependent, in other cases you might want to also keep the long-non-coding RNA or any types of immunoglobulin transcripts.
 
 ```{r}
 # subset the reference genes to only the protein coding genes
@@ -310,20 +333,53 @@ head(object@meta.data)
 `nCount_Spatial` = total number of counts (a genes can be present multiple times)
 
 ```{r}
-p1 <- hist(object@meta.data$nFeature_Spatial)
-p2 <- MapFeatures(object = object, features = "nFeature_Spatial", layer = "counts")
+p1 <- ggplot(object@meta.data, aes(nFeature_Spatial)) + geom_histogram()
+p2 <- MapFeatures(object = object, features = "nFeature_Spatial", slot = "counts")
 
 p <- p1 | p2
 p
 ```
 
 
+We could decide to remove all spots that have less than a certain number of genes since
+the section we analyse could have wholes or empty regions.
+
+We would do it by running:
+
+```{r}
+# Define thresholds for each subset object (adjust the values as needed)
+threshold <- 1000
+
+spots_to_keep <- names(object$nCount_Spatial[object$nCount_Spatial > threshold])
+object$spots_to_keep <- object$nCount_Spatial > threshold
+
+
+p <- MapLabels(
+  object = object,
+  column_name = "spots_to_keep"
+)
+p
+
+#object2 <- SubsetSTData(object, spots = spots_to_keep)
+```
+
+
+Before we continue with the processing, we just need to make sure that no spots contains
+exactly 0 count. That would produces `NaN` in some function, then breaking others.
+
+Check:
+
+```{r}
+sum(object$nCount_Spatial == 0)
+```
+
+
 ### Processing
 
-The data collected by the array and sequenced after library sequencing are proned to
+The data collected by the array and sequenced after library sequencing are prone to
 biological and technical variations. 
 This raw data is called "counts" in a `Seurat` object.
-We need to correct for differences in gene sequences (ScaleData), and in spot differences (NormilizeData) so that the expression is comparable across sample, spots and genes.
+We need to correct for differences in gene sequences (ScaleData), and in spot differences (NormalizeData) so that the expression is comparable across sample, spots and genes.
 
 We checked before by printing the outlook of the object, that we have only the raw counts from after the `spaceranger` run.
 
@@ -336,7 +392,7 @@ Normalize the counts (the amount of RNA and UMIs differ between spots (cells in 
 
 Formula:
 
-normalized count = log1p(((raw count/total counts for that spot)*10000) + 1)
+normalized count = log1p(count / total_counts × 10000)
 
 
 ```{r}
@@ -345,21 +401,21 @@ object_norm <- NormalizeData(object = object)
 
 
 ```{r}
-p1 <- hist(object, n=50) # distribution of the total number of molecule/spot before normalization
-p2 <- hist(object_norm, n=50) # distribution of the total number of molecule/spot after normalization
+p1 <- ggplot(object@meta.data, aes(nCount_Spatial)) + geom_histogram() # distribution of the total number of molecule/spot before normalization
+p2 <- ggplot(object_norm@meta.data, aes(nCount_Spatial)) + geom_histogram() # distribution of the total number of molecule/spot after normalization
 
 p3 <- MapFeatures(
   object = object,
   slot = "counts", # Here we use the non-normalized & unscaled layer
-  features = "nCount_Spatial", #total number of molecules per spot
+  features = "MYH6", #total number of molecules per spot
   pt_size = 3,
   image_use = "raw"
 )
 
 p4 <- MapFeatures(
   object = object_norm,
-  slot = "data", # Here we use the normalized and sclaed layer
-  features = "nCount_Spatial", #total number of molecules per spot
+  slot = "data", # Here we use the normalized and scaled layer
+  features = "MYH6", #total number of molecules per spot
   pt_size = 3,
   image_use = "raw"
 )
@@ -371,7 +427,7 @@ p
 
 #### 2. Find variable features
 
-Some of the downstream prcessing are relatively computing costly, so we gain
+Some of the downstream processing are relatively computing costly, so we gain
 from restricting the gene space to only the genes that are the most variable
 across spots. Excluding the invariable genes help for:
 - Improved signal-to-noise ratio
@@ -451,6 +507,7 @@ p3 <- MapFeatures(object = object,
                   slot = "data")
 
 p <- p1 | p2 | p3
+p
 ```
 
 
@@ -470,7 +527,7 @@ microenvironments.
 
 It is again a multi-step processes:
 
-1. Principal Componenent Analysis (PCA)
+1. Principal Component Analysis (PCA)
 2. Find the neighbors & Build graph
 3. Find the clusters
 4. Visualize the clusters on a UMAP embedding
@@ -528,7 +585,7 @@ object <- FindClusters(object = object,
 
 Project the clusters onto a 2D layout to inspect global relationships.
 Here we want to visualize each of our spots as clusters that we just computed.
-So we take the first 20 principal compenents from our PCA analysis, and project
+So we take the first 20 principal components from our PCA analysis, and project
 them in a 2D space using the **Uniform Manifold Approximation and Projection (UMAP)**,
 "a popular data science tool used for machine learning and data visualization. 
 It shrinks complex information with many variables down into a simple 2D or 3D picture."
@@ -574,7 +631,7 @@ of the clusters we identified. To do so we use an analysis method called
 
 We rely mainly on the `FindAllMarkers()` function from the `Seurat` package.
 If you check the function documentation online, you can find out about the different 
-test that one can choose from. We will the default `Wilcoxon test`. The function
+test that one can choose from. We will use the default `Wilcoxon test`. The function
 accounts for the multiple testing. After running the test, we will explore quickly
 its results.
 
@@ -665,7 +722,7 @@ top2 <- top5 |>
   top_n(-2, p_val_adj)
 
 MapFeatures(object = object,
-            features = top2$gene,
+            features = unique(top2$gene),
             ncol = 6)
 ```
 
