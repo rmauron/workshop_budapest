@@ -10,7 +10,6 @@ editor_options:
 ---
 
 
-# Step-by-step discovery of Visium data analysis using embryonic heart sections.
 ## 2026 V4SDB Student Summer School
 ### Visium workshop
 
@@ -225,7 +224,7 @@ length(rownames(object)) - length(genes_to_keep)
 
 ### Question:
 
-1.  How many genes is there already that we want to filter out?
+1.  How many genes have we identified for removal so far?
 
 Now we can proceed with a first filtering. We want to remove the undesirable genes, meaning we want to keep only all the other genes. We use the function `SubsetSTData()` from the *semla* package, which ensure that the spatial information is also modified correctly.
 
@@ -234,11 +233,11 @@ object <- SubsetSTData(object, features = genes_to_keep)
 object
 ```
 
-Note that when using `SubsetSTData()` we assigned the result of the function to the same original name `object`. That action overwrites the previous state of our object. In case you want to keep the unfiltered and filtered together, should assign the result of the function to a different variable name.
+Note that when using `SubsetSTData()` we assigned the result of the function to the same original name `object`. That action overwrites the previous state of our object. If you want to keep the unfiltered and filtered versions side by side, assign the result to a different variable name.
 
 ### More systematic filtering
 
-The extra transcripts we sequence and gather in our object do not limit itself to the 4 categories we successfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories. Here, we will use the *GRCh38-2020-A genome reference* which let us figure out the main categories our biomolecules belongs too.
+The extra transcripts we sequence and gather in our object do not limit themselves to the 4 categories we successfully removed above. Databases allow us to annotate the remaining genes we sequenced into some categories. Here, we will use the *GRCh38-2020-A genome reference* which lets us find out which category each gene belongs to.
 
 The complete *GRCh38-2020-A genome reference* is quite large so here we provide the single file of that reference that you can load in the next chunk.
 
@@ -353,7 +352,18 @@ all(object$nCount_Spatial == colSums(LayerData(object, "counts"))) # check that 
 
 ### Processing
 
-The data collected by the array and sequenced after library sequencing are prone to biological and technical variations. This raw data is called "counts" in a `Seurat` object. We need to correct for differences in gene sequences, a per-gene z-score so no gene dominates the PCA, (`ScaleData()`), and in spot differences (`NormalizeData()`) so that the expression is comparable across sample, spots and genes.
+The data collected by the array and sequenced after library preparation are prone to
+biological and technical variation. This raw data is called "counts" in a `Seurat` object.
+
+Before we can compare spots and genes to each other, we apply two corrections:
+
+- `NormalizeData()` works **per spot**. Spots capture different amounts of RNA, so a gene
+  can look highly expressed simply because that spot yielded more molecules overall.
+  Normalization puts every spot on a comparable scale.
+- `ScaleData()` works **per gene**. It converts each gene to a z-score, so that a highly
+  expressed gene does not dominate the PCA purely because its values are large.
+
+Note the order: scaling is applied to the normalized values, not to the raw counts.
 
 We checked before by printing the outlook of the object, that we have only the raw counts from after the `spaceranger` run.
 
@@ -663,7 +673,7 @@ plts
 ```{r}
 top2 <- top5 |>
   group_by(cluster) |>
-  top_n(-2, p_val_adj)
+  slice_min(p_val_adj, n = 2, with_ties = FALSE)
 
 MapFeatures(object = object,
             features = unique(top2$gene),
@@ -684,35 +694,6 @@ multiple sections simultaneously. Here we will add 2 extra heart sections of 2
 different time points. We will repeat all the steps we did above, this time less
 explanation to read, and you can run quicker the code that allows you to do some
 temporal exploration.
-
-
-### Load data & create infoTable from metadata + spaceranger outs
-
-```{r}
-data_root_directory <- file.path("./data/spaceranger/*")
-metadata <- read.csv("./data/metadata.csv")
-
-samples <- Sys.glob(paths = file.path(data_root_directory, "filtered_feature_bc_matrix.h5"))
-imgs <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_hires_image.png"))
-spotfiles <- Sys.glob(paths = file.path(data_root_directory, "spatial", "tissue_positions_list.csv"))
-json <- Sys.glob(paths = file.path(data_root_directory, "spatial", "scalefactors_json.json"))
-```
-
-```{r}
-infoTable <- tibble(samples,
-                    imgs,
-                    spotfiles,
-                    json,
-                    slide_id = list.files(path = "./data/spaceranger/"),
-                    sample_id = list.files(path = "./data/spaceranger/"),
-                    organ = metadata$organ,
-                    organism = metadata$organism,
-                    age = metadata$pcw_age,
-                    sex = metadata$sex)
-
-rm(data_root_directory, samples, imgs, spotfiles, json)
-```
-
 
 ### 1. Build infoTable
 
@@ -742,7 +723,7 @@ stopifnot(!any(is.na(infoTable$pcw_age)))
 print(infoTable)                            # eyeball before loading
 ```
 
-Here you see in the column `pcw_age` (post concepotional week), that we have 3 sections
+Here you see in the column `pcw_age` (post conceptional week), that we have 3 sections
 of 3 distinct ages. We also know the sex of the embryos, but we will look later how we
 could figure it out if we did not have that information.
 
@@ -822,53 +803,107 @@ se <- harmony::RunHarmony(se, group.by.vars = "sample_id",
 ```
 
 
-### 7.1 Clustering - uncorrected
+### 7. Clustering: uncorrected versus corrected
+
+We now cluster twice, once on the raw PCA and once on the Harmony-corrected embedding,
+and keep both results so we can compare them side by side. Everything else — the number
+of dimensions, the algorithm, the resolution — stays identical, so any difference we see
+comes from the correction alone.
 
 ```{r}
-reduction_use <- "pca"
-dims_use      <- 1:20
-
-se <- FindNeighbors(se, reduction = reduction_use, dims = dims_use)
+# 7.1 — clustering on the uncorrected PCA
+se <- FindNeighbors(se, reduction = "pca", dims = 1:20)
 se <- FindClusters(se, algorithm = 1, resolution = 0.8)
-se <- RunUMAP(se, reduction = reduction_use, dims = dims_use, seed.use = 42)
+se$clusters_pca <- se$seurat_clusters      # save before it gets overwritten
+se <- RunUMAP(se, reduction = "pca", dims = 1:20, seed.use = 42,
+              reduction.name = "umap_pca")
 
-DimPlot(se, reduction = "umap", group.by = "seurat_clusters") |
-  DimPlot(se, reduction = "umap", group.by = "sample_id")
-
-MapLabels(se, column_name = "seurat_clusters", pt_size = 1.5)
+# 7.2 — same steps, this time on the Harmony embedding
+se <- FindNeighbors(se, reduction = "harmony", dims = 1:20)
+se <- FindClusters(se, algorithm = 1, resolution = 0.8)
+se$clusters_harmony <- se$seurat_clusters
+se <- RunUMAP(se, reduction = "harmony", dims = 1:20, seed.use = 42,
+              reduction.name = "umap_harmony")
 ```
 
-We can see that here, spots tend to cluster by their respective origins (the 
-section they come from), rather than by their biological similarity
+Note that we copy `seurat_clusters` into a new column each time. `FindClusters()` always
+writes to that same column, so without the copy the first result would be lost. The same
+applies to `RunUMAP()`, which is why we give each embedding its own `reduction.name`.
 
+#### Are the spots grouping by biology or by section?
 
-### 7.2 Clustering - corrected
-
-So now we will cluster on top of the corrected PCA representation after
-Harmony.
+The clearest diagnostic is to colour the UMAP by section rather than by cluster. If spots
+separate cleanly by `sample_id`, the dominant signal is where the spot came from, not what
+tissue it is.
 
 ```{r}
-reduction_use <- "harmony"
-dims_use      <- 1:20
+p1 <- DimPlot(se, reduction = "umap_pca",     group.by = "sample_id") + ggtitle("Before (PCA)")
+p2 <- DimPlot(se, reduction = "umap_harmony", group.by = "sample_id") + ggtitle("After (Harmony)")
 
-se <- FindNeighbors(se, reduction = reduction_use, dims = dims_use)
-se <- FindClusters(se, algorithm = 1, resolution = 0.8)
-se <- RunUMAP(se, reduction = reduction_use, dims = dims_use, seed.use = 42)
-
-DimPlot(se, reduction = "umap", group.by = "seurat_clusters") |
-  DimPlot(se, reduction = "umap", group.by = "sample_id")
-
-MapLabels(se, column_name = "seurat_clusters", pt_size = 1.5)
+p <- p1 | p2
+p
 ```
 
-We can observe that now, spots from the different section group better by
-anatomical and molecular similarity, rather than their origin. These steps
-are art, and rather project/question dependent. Over correcting, and one
-loses the information that separate 1 section to the other. Under correcting,
-and one end up retrieving all the technical/batch noise. 
-(`Harmony`)[https://www.nature.com/articles/s41592-019-0619-0] provides
-a range of parameters worth checking the day you need to use such batch effect
-correction.
+On the uncorrected embedding, the three sections form largely separate territories. After
+Harmony they overlap, meaning spots from different sections now sit next to each other when
+they are transcriptionally similar.
+
+We can also ask how the two clusterings relate. Each row is an uncorrected cluster, each
+column a corrected one:
+
+```{r}
+table(se$clusters_pca, se$clusters_harmony)
+```
+
+A cluster whose spots spread across many columns was split or reassigned by the correction.
+A tight diagonal block means that cluster was robust either way.
+
+#### Back to the tissue
+
+The UMAP is a summary; the section is the ground truth. A good correction should make the
+same anatomical structure receive the same cluster label in all three sections.
+
+```{r}
+MapLabels(se, column_name = "clusters_pca", pt_size = 1.5)
+```
+
+```{r}
+MapLabels(se, column_name = "clusters_harmony", pt_size = 1.5)
+```
+
+### Question
+
+1. In the uncorrected version, do the three sections share cluster labels, or does each
+   section have largely its own?
+2. Pick a structure you can identify on the H&E, for example the ventricular wall. Does it
+   get the same label across sections before correction? After?
+
+::: {.callout-important}
+## An important limitation of this dataset
+
+We have one section per age, so `sample_id` and `pcw_age` carry exactly the same
+information:
+
+```{r}
+table(se$sample_id, se$pcw_age)
+```
+
+That means batch and biology are perfectly confounded here. When we tell Harmony to remove
+differences between sections, we are also telling it to remove differences between
+developmental stages — it has no way to tell them apart. The corrected clustering is
+therefore useful for finding shared anatomy across sections, but it cannot be used as
+evidence that a structure is or is not changing with age.
+
+The published atlas avoided this by using at least two near-consecutive sections per heart
+as technical replicates, across 16 hearts spanning PCW 6 to 12. With replicates, the
+section-to-section variation can be estimated separately from the age effect.
+:::
+
+Batch correction is as much judgement as method, and it depends on the question being
+asked. Over-correct and you erase real differences between samples; under-correct and the
+technical signal drives your clusters. [Harmony](https://www.nature.com/articles/s41592-019-0619-0)
+exposes several parameters (notably `theta`, which controls how aggressively it mixes
+groups) that are worth reading about the day you need this on your own data.
 
 
 ### 8. Cluster markers
@@ -922,6 +957,7 @@ p <- MapFeatures(
   features = gene,
   ncol = 3
 )
+p
 ```
 
 ### 9. Checkpoint
@@ -931,7 +967,7 @@ Here we will simply see how it is done, but in order to not clutter the server
 at our disposal, we will not save it.
 
 ```{r}
-#| eval = FALSE
+#| eval: false
 
 # dir.create("./checkpoints", showWarnings = FALSE)         # create a directory to save results
 # saveRDS(se,      "./checkpoints/3sections_clustered.rds") # save the 3 sections object 
