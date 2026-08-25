@@ -2,11 +2,28 @@
 title: "Step-by-step discovery of Visium data analysis using embryonic heart sections."
 author: Raphaël Mauron
 date: today
-format: html
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    number-sections: false
+    embed-resources: true
+    code-copy: true
+    code-overflow: wrap
+    fig-width: 8
+    fig-height: 5
 execute:
   echo: true
+  warning: false
+  message: false
+knitr:
+  opts_chunk:
+    dev: "ragg_png"
 editor_options:
-  chunk_output_type: console
+  chunk_output_type: inline
+  markdown:
+    wrap: 72
 ---
 
 
@@ -242,7 +259,7 @@ MapFeatures(
   object    = object,
   slot      = "counts",
   features  = c("MYH6", "MYH7"),
-  pt_size   = 3,
+  pt_size   = 1,
   image_use = "raw"
 )
 ```
@@ -408,7 +425,7 @@ We would do it by running:
 
 ```{r}
 # Define thresholds for each subset object (adjust the values as needed)
-threshold <- 1000
+threshold <- 2000
 
 object$to_keep <- factor(ifelse(object$nCount_Spatial > threshold, "keep", "drop"))
 sum(object$to_keep == "drop")
@@ -416,7 +433,8 @@ sum(object$to_keep == "drop")
 
 p <- MapLabels(
   object = object,
-  column_name = "to_keep"
+  column_name = "to_keep",
+  pt_size = 2
 )
 p
 
@@ -480,16 +498,14 @@ p3 <- MapFeatures(
   object = object,
   slot = "counts", # Here we use the non-normalized & unscaled layer
   features = gene,
-  pt_size = 3,
-  image_use = "raw"
+  pt_size = 1
 )
 
 p4 <- MapFeatures(
   object = object_norm,
   slot = "data", # Here we use the normalized and scaled layer
   features = gene,
-  pt_size = 3,
-  image_use = "raw"
+  pt_size = 1
 )
 
 p <- (p1 | p3) / (p2 | p4)
@@ -560,13 +576,16 @@ That is all the transformation that we will perform on our data. Let's visualize
 ```{r}
 p1 <- MapFeatures(object = object,
                   features = "MYH6",
-                  slot = "counts")
+                  slot = "counts") &
+  labs(title = "counts")
 p2 <- MapFeatures(object = object,
                   features = "MYH6",
-                  slot = "scale.data")
+                  slot = "scale.data") &
+  labs(title = "scale.data")
 p3 <- MapFeatures(object = object,
                   features = "MYH6",
-                  slot = "data")
+                  slot = "data") &
+  labs(title = "data")
 
 p <- p1 | p2 | p3
 p
@@ -639,10 +658,11 @@ object <- RunUMAP(object = object,
 Once UMAP is ran, we can visualize the results in a scatter plot. We need to specify the `metadata` column that contains the label of our clusters. In that case, we use the column called `seurat_clusters`.
 
 ```{r}
-p <- DimPlot(object = object, 
+p1 <- DimPlot(object = object, 
              reduction = "umap", 
-             group.by = "seurat_clusters")
-p
+             group.by = "seurat_clusters") &
+  labs(title = "UMAP - each point corresponds to a spot")
+p1
 ```
 
 #### 5. Visualize the clusters on the tissue section
@@ -650,10 +670,26 @@ p
 Overlay cluster colors directly onto the histology image to verify anatomical alignment.
 
 ```{r}
-p <- MapLabels(object = object,
-               column_name = "seurat_clusters")
+p2 <- MapLabels(object = object,
+               column_name = "seurat_clusters",
+               pt_size = 2)
+p2
+```
+
+It might be easier to visualize them side-by-side
+
+```{r}
+p1 <- DimPlot(object = object, 
+             reduction = "umap", 
+             group.by = "seurat_clusters")
+p2 <- MapLabels(object = object,
+               column_name = "seurat_clusters",
+               pt_size = 1)
+
+p <- p1 | p2
 p
 ```
+
 
 #### 6. Differentially Expressed Genes (DEG)
 
@@ -730,6 +766,7 @@ top5 <- detable |>
   slice_max(pct.diff,  n = 10, with_ties = FALSE) |>
   slice_max(avg_log2FC, n = 5, with_ties = FALSE) |>
   ungroup()
+top5
 ```
 
 And finally visualize it
@@ -809,8 +846,8 @@ annotation <- c(
   "9" = "?"
 )
 
-object$manual_annotation <- annotation[as.character(object$seurat_clusters)]
-MapLabels(object, column_name = "manual_annotation")
+object$manual_annotation <- unname(annotation[as.character(object$seurat_clusters)])
+MapLabels(object, column_name = "manual_annotation", pt_size = 2)
 ```
 
 ### Question
@@ -881,15 +918,15 @@ stopifnot(length(samples) == length(imgs),
 infoTable <- tibble(samples, imgs, spotfiles, json) |>
   mutate(sample_id = basename(dirname(samples)),
          slide_id  = sample_id) |>
-  left_join(metadata, by = "sample_id")
+  left_join(metadata, by = "sample_id") |>
+  arrange(pcw_age)
 
 stopifnot(!any(is.na(infoTable$pcw_age)))
 print(infoTable)                            # eyeball before loading
 ```
 
 Here you see in the column `pcw_age` (post conceptional week), that we have 3 sections
-of 3 distinct ages. We also know the sex of the embryos, but we will look later how we
-could figure it out if we did not have that information.
+of 3 distinct ages. We also know the sex of the embryos, let's figure it out first!
 
 ### 2. Load data 
 
@@ -899,6 +936,8 @@ Note that now we are loading all the information of the 3 sections into a single
 ```{r}
 se <- ReadVisiumData(infoTable)
 se <- LoadImages(se, image_height = 400)
+
+se$sample_id <- factor(se$sample_id, levels = unique(se$sample_id))
 ```
 
 
@@ -917,6 +956,10 @@ FetchData(se, layer = "counts", vars = intersect(sex_genes, rownames(se))) |>
   group_by(sample_id) |>
   summarise(across(everything(), mean))
 ```
+
+We used raw counts (before normalization), because we do the processing steps
+after filtering. Here the values are more of a qualitative measurement rather than
+quantitative. We want to know if the genes are there (male) or not (female).
 
 
 ### Question
@@ -957,12 +1000,15 @@ se
 ### 4. Per-section QC
 
 ```{r}
-ggplot(se@meta.data, aes(nCount_Spatial, fill = sample_id)) +
+p1 <- ggplot(se@meta.data, aes(nCount_Spatial, fill = sample_id)) +
   geom_histogram(bins = 50) +
   facet_wrap(~ sample_id, scales = "free_y") +
   labs(title = "Library size per spot, by section")
 
-MapFeatures(se, features = "nCount_Spatial", pt_size = 1.5)
+p2 <- MapFeatures(se, features = "nCount_Spatial", pt_size = 0.8, ncol = 3, label_by = "sample_id")
+
+p <- p1 / p2
+p
 ```
 
 
@@ -1051,11 +1097,19 @@ The UMAP is a summary; the section is the ground truth. A good correction should
 same anatomical structure receive the same cluster label in all three sections.
 
 ```{r}
-MapLabels(se, column_name = "clusters_pca", pt_size = 1.5)
+MapLabels(se, column_name = "clusters_pca", pt_size = 1, ncol = 3) +
+  plot_layout(guides = "collect") &
+  guides(fill = guide_legend(override.aes = list(size = 3), 
+                             ncol = 2)) &
+  theme(legend.position = "right")
 ```
 
 ```{r}
-MapLabels(se, column_name = "clusters_harmony", pt_size = 1.5)
+MapLabels(se, column_name = "clusters_harmony", pt_size = 1, ncol = 3) +
+  plot_layout(guides = "collect") &
+  guides(fill = guide_legend(override.aes = list(size = 3), 
+                             ncol = 2)) &
+  theme(legend.position = "right")
 ```
 
 ### Question
@@ -1197,57 +1251,65 @@ res <- FindAllMarkers(sub,
                       min.pct = 0.05) |>
   filter(p_val_adj < 0.05)
 
-res |> group_by(cluster) |> slice_max(avg_log2FC, n = 10) |> ungroup()
+res <- as_tibble(res)
+res <- res |> dplyr::rename(age = cluster) |> group_by(age) |> slice_max(avg_log2FC, n = 10) |> ungroup()
 ```
 
 
 By doing this, we isolate all the spots corresponding to a cluster of interest and ask
-"Whithin this cluster, which are the marker that differs the most accross age/section?".
+"Within this cluster, which are the markers that differ the most across age/section?".
 The way it is calculated is, taking the spots of the clusters of choice of 1 age (e.g. pcw 6)
-and compare it to the spots of age 2 and 3 together (e.g. pcw 9 and 10 pulled together).
+and compare it to the spots of age 2 and 3 together (e.g. pcw 9 and 10 pooled together).
 This step is repeated for all the age categories (pcw 9 against 6 & 10, and then 
 pcw 10 against 6 and 9 together).
 
 #### 2. Visualisation
 
 ```{r}
-VlnPlot(sub, features = head(unique(res$gene), 6), group.by = "pcw_age", ncol = 3)
+top2_per_age <- res |>
+  group_by(age) |>
+  top_n(-2, p_val_adj)
+
+VlnPlot(sub, features = top2_per_age$gene, group.by = "pcw_age", ncol = 2)
 ```
 
 ```{r}
 # Plot top2 markers per category
-DotPlot(sub, features = head(unique(res$gene), 6), assay = "Spatial") +
+DotPlot(sub, features = top2_per_age$gene, assay = "Spatial") +
   coord_flip() +
   scale_color_gradientn(colours = rev(RColorBrewer::brewer.pal(11, "RdBu"))) +
   scale_x_discrete(limits = rev) +
-  labs(x = "", y = "", title = "Cluster markers across 3 sections")
+  labs(x = "", y = "", title = "Age-associated genes within a cluster")
 ```
 
 
-But maybe, the actual spatial plot might be even easier
+But maybe, the actual spatial plot might be even easier.
+Let's plot it on the 3 sections.
 
 ```{r}
 MapFeatures(
   object = se,
-  features = head(unique(res$gene), 6),
-  ncol = 3
+  features = top2_per_age$gene,
+  ncol = 3,
+  pt_size = 0.6
 )
 ```
 
 
-### 11. How to take of the spatial information bioinformatically
+
+### 11. How to take advantage of the spatial information bioinformatically
 
 We covered many steps until here. Many of the steps that are covered in most Visium
-data analysis. But it is important to note that most of these steps are borowed from 
+data analysis. But it is important to note that most of these steps are borrowed from 
 single-cell RNA seq. But we can do way more with spatial data by taking advantage of
 the spots coordinates as an actual spatial information, instead of just as a barcode.
 
 A question that often comes out is:
 
-"Does the genes I considered Variable Gene, are actually spatially specific?"
+"Are the genes we called variable actually spatially structured?"
 
-A gene might have an intrisic high variability accross spots, but its expression be 
-completely scattered accross the tissue section. We can rely on some spatial 
+A gene might have an intrinsic high variability across spots, but its expression be 
+completely scattered across the tissue section. We can rely on some spatial 
 statistics to answer that question.
 
 ```{r}
@@ -1257,6 +1319,7 @@ test_features <- VariableFeatures(se)[1:500]
 # evaluate their spatial autocorrelation
 sp_cor <- CorSpatialFeatures(object = se, features = test_features)
 
+# Check the list on section 1
 # genes with the most spatially structured expression
 head(sp_cor[[1]], 20)   
 
@@ -1267,23 +1330,112 @@ tail(sp_cor[[1]], 20)
 
 Again, it is the best to visualize them spatially:
 
+#### Section 1
+
 ```{r}
-positive_corr <- sp_cor[[1]]$gene[1:5]
+section_number <- 1
+
+positive_corr <- sp_cor[[section_number]]$gene[1:6]
 
 MapFeatures(
   object = se,
   features = positive_corr,
+  section_number = section_number,
   ncol = 3
 )
 ```
 
 
 ```{r}
-negative_corr <- tail(subset(sp_cor[[1]], !is.nan(cor))$gene, 5)
+negative_corr <- tail(subset(sp_cor[[section_number]], !is.nan(cor))$gene, 6)
 
 MapFeatures(
   object = se,
   features = negative_corr,
+  section_number = section_number,
   ncol = 3
 )
+```
+
+
+#### Section 2
+
+```{r}
+section_number <- 2
+
+positive_corr <- sp_cor[[section_number]]$gene[1:6]
+
+MapFeatures(
+  object = se,
+  features = positive_corr,
+  section_number = section_number,
+  ncol = 3
+)
+```
+
+
+```{r}
+negative_corr <- tail(subset(sp_cor[[section_number]], !is.nan(cor))$gene, 6)
+
+MapFeatures(
+  object = se,
+  features = negative_corr,
+  section_number = section_number,
+  ncol = 3
+)
+```
+
+
+#### Section 3
+
+```{r}
+section_number <- 3
+
+positive_corr <- sp_cor[[section_number]]$gene[1:6]
+
+MapFeatures(
+  object = se,
+  features = positive_corr,
+  section_number = section_number,
+  ncol = 3
+)
+```
+
+
+```{r}
+negative_corr <- tail(subset(sp_cor[[section_number]], !is.nan(cor))$gene, 6)
+
+MapFeatures(
+  object = se,
+  features = negative_corr,
+  section_number = section_number,
+  ncol = 3
+)
+```
+
+
+
+
+### Closing note
+
+In this workshop we went through the most important pre-processing, processing, clustering steps
+for a single section and for a couple of sections together. We explored some quality metrics, tried
+to correct for batch effect using Harmony, and explored a way to identify temporal changes across
+clusters of interest. Finally we understood that this is just the start, and from there much more
+spatially aware analyses can be performed.
+
+Due to lack of time, we have not covered deconvolution, niche analysis, pathways, spatially aware
+clustering, spatial interactions, pseudotime analyzis, and more.
+
+For further explorations, here are some suggested resources:
+
+[semla documentation](https://spatial-research.github.io/semla/index.html)
+[Seurat documentation](https://satijalab.org/seurat/articles/spatial_vignette)
+[Deconvolution with Stereoscope](https://www.nature.com/articles/s42003-020-01247-y)
+[Spatially aware clustering with BANKSY](https://github.com/prabhakarlab/Banksy)
+[Spatial interaction](https://github.com/StatBiomed/SpatialDM)
+
+
+```{r}
+sessionInfo()
 ```
