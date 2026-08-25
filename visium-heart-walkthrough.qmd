@@ -9,11 +9,52 @@ editor_options:
   chunk_output_type: console
 ---
 
-In this workshop, we will discover the data analysis of Visium data from 10x Genomics. All the code is provided, so you are not asked to code it yourself, but rather read thoroughly the steps that help us load the data, filter the data, process it, cluster. In a second time, if time allow, all the steps are repeated for use case with 3 tissue sections, where complementary and more advanced analyses are suggested. If the time does not allow us to do it together, you are welcome to go through it by yourself and contact me later for questions.
 
-The data is collected following the poly-A capture technology from 10x Genomics. On the plot below is a reminder:
+# Step-by-step discovery of Visium data analysis using embryonic heart sections.
+## 2026 V4SDB Student Summer School
+### Visium workshop
 
-![Visium Poly-A](./data/img/10x_visium_poly_A.jpeg)
+In this workshop we will go step by step through the analysis of Visium data from 10x
+Genomics. All the code is provided so you are not asked to write it yourself, but to read
+each step carefully and understand what it does and why. We will load the data, filter it,
+process it, and cluster it on a single tissue section. If time allows, all the steps are
+then repeated on three sections of different developmental ages simultaneously, where more advanced
+analyses are suggested. If we do not get there together, you are welcome to work through it
+on your own and contact me with any questions.
+
+### What Visium measures
+
+A Visium slide carries a grid of ~5,000 spots, each 55 µm across and spaced 100 µm apart 
+(distance from center to center of spots). Every spot carries millions of capture oligos 
+sharing one **spatial barcode** unique to that position. 
+When a tissue section is placed on the slide and permeabilised, mRNA diffuses down
+into the spots and is captured by a poly-T sequence that binds the poly-A tail of the
+transcript. After sequencing, the barcode tells us *where* on the slide a transcript came
+from, and the rest of the read tells us *which gene* it was.
+
+Two consequences shape everything that follows. 
+
+- First, a spot is a fixed position, not a cell, at 55 µm it typically covers a handful of cells, so what we measure is a local mixture. 
+- Second, poly-A capture is indiscriminate: any polyadenylated transcript is sequenced, whether or not we are interested in it. A large part of this workshop is deciding what to keep.
+
+![Poly-A capture on the Visium array](./data/img/10x_visium_poly_A.jpeg)
+
+### By the end of the session you will have
+
+- Loaded a Visium section into R and plotted a gene on the tissue
+- Decided which genes to filter out, and justified why
+- Normalized, scaled, and reduced the data
+- Clustered the spots and mapped the clusters back onto the anatomy
+- Found the genes that define each cluster
+
+### Practical notes
+
+Grey boxes are **code chunks**. Run the chunk your cursor is in with 
+`Cmd/Ctrl + Shift +Enter`, or a single line with `Cmd/Ctrl + Enter`. 
+Run them in order, top to bottom; several steps overwrite `object` with 
+an updated version, so skipping one will produce confusing
+errors later. Red text in the console is not always an error; warnings are common and
+usually harmless. If something breaks, say so and we will look at it together.
 
 ## Set up
 
@@ -545,6 +586,26 @@ print(head(detable))
 ```
 
 We can see that the results is a dataframe containing several metrics in the columns such as the average log fold change (avg_log2FC) or the adjusted p-values (p_val_adj), but also the name of the genes and the clusters it belongs to.
+We expect to recover known anatomical markers since the test is supposed to pull out which
+genes are the most specific to our clusters. 
+
+We hope to find some of these:
+- MYH6/NPPA       atria, 
+- MYH7/IRX4       ventricle, 
+- TNNT2           pan-cardiomyocyte, 
+- COL1A1/POSTN    valve mesenchyme, 
+- PECAM1          endothelium
+
+```{r}
+gene_to_look_up <- "NPPA"
+
+detable |> filter(gene == gene_to_look_up)
+```
+
+
+### Question:
+1. Do you see some of these genes in the detable?
+2. What do you observe that seems odd?
 
 Let's find out more:
 
@@ -572,9 +633,10 @@ Then we can select the top5 markers per clusters
 # Select top genes by p_val_adj, pct.diff and avg_log2FC
 top5 <- detable |> 
   group_by(cluster) |> 
-  top_n(-20, p_val_adj) |> 
-  top_n(10, pct.diff) |> 
-  top_n(5, avg_log2FC)
+  slice_min(p_val_adj, n = 20, with_ties = FALSE) |>
+  slice_max(pct.diff,  n = 10, with_ties = FALSE) |>
+  slice_max(avg_log2FC, n = 5, with_ties = FALSE) |>
+  ungroup()
 ```
 
 And finally visualize it
@@ -617,6 +679,13 @@ MapFeatures(object = object,
 
 ## Now we will do the same but with 3 sections
 
+Researchers usually have specific questions which require the joint analysis of
+multiple sections simultaneously. Here we will add 2 extra heart sections of 2
+different time points. We will repeat all the steps we did above, this time less
+explanation to read, and you can run quicker the code that allows you to do some
+temporal exploration.
+
+
 ### Load data & create infoTable from metadata + spaceranger outs
 
 ```{r}
@@ -645,15 +714,11 @@ rm(data_root_directory, samples, imgs, spotfiles, json)
 ```
 
 
+### 1. Build infoTable
 
 ```{r}
-# ---------------------------------------------------------------------------
-# Full pipeline, 3 sections. Same steps as above, run end to end.
-# ---------------------------------------------------------------------------
-
 set.seed(1)
 
-## 1. Build infoTable -------------------------------------------------------
 # Join metadata on sample_id rather than trusting that file order matches CSV
 # row order — otherwise sections can silently get the wrong age.
 
@@ -671,22 +736,33 @@ stopifnot(length(samples) == length(imgs),
 infoTable <- tibble(samples, imgs, spotfiles, json) |>
   mutate(sample_id = basename(dirname(samples)),
          slide_id  = sample_id) |>
-  left_join(metadata, by = "sample_id")     # <-- adjust key to your CSV
+  left_join(metadata, by = "sample_id")
 
 stopifnot(!any(is.na(infoTable$pcw_age)))
 print(infoTable)                            # eyeball before loading
 ```
 
+Here you see in the column `pcw_age` (post concepotional week), that we have 3 sections
+of 3 distinct ages. We also know the sex of the embryos, but we will look later how we
+could figure it out if we did not have that information.
+
+### 2. Load data 
+
+This time we will call our object `se`, short for `Seurat object`.
+Note that now we are loading all the information of the 3 sections into a single object.
 
 ```{r}
-## 2. Load ------------------------------------------------------------------
 se <- ReadVisiumData(infoTable)
 se <- LoadImages(se, image_height = 400)
 ```
 
 
+### 3. Gene filtering
+We repeat the 2 filtering steps we did earlier.
+Removing the MT, HB, RP and MALAT1, and annotating the genes in order to
+keep only the protein coding genes.
+
 ```{r}
-## 3. Gene filtering --------------------------------------------------------
 pattern <- paste0(
   "^MT-",
   "|^HB[ABDEGMQZ][0-9]?$",
@@ -710,8 +786,9 @@ se
 ```
 
 
+### 4. Per-section QC
+
 ```{r}
-## 4. Per-section QC --------------------------------------------------------
 ggplot(se@meta.data, aes(nCount_Spatial, fill = sample_id)) +
   geom_histogram(bins = 50) +
   facet_wrap(~ sample_id, scales = "free_y") +
@@ -721,8 +798,9 @@ MapFeatures(se, features = "nCount_Spatial", pt_size = 1.5)
 ```
 
 
+### 5. Processing
+
 ```{r}
-## 5. Processing ------------------------------------------------------------
 se <- NormalizeData(se)
 se <- FindVariableFeatures(se, selection.method = "vst", nfeatures = 3000)
 se <- ScaleData(se)
@@ -732,23 +810,24 @@ ElbowPlot(se, ndims = 50, reduction = "pca", plot_type = "variance")
 ```
 
 
-```{r}
-## 6. Batch correction ------------------------------------------------------
-# Three sections were captured on different slides, so part of what separates
-# them is technical. Harmony adjusts the PCA embedding so that spots group by
-# biology rather than by slide. Run the clustering below BOTH ways and compare:
-# if clusters split perfectly by sample_id on "pca", that split is batch.
+### 6. Batch correction
+Three sections were captured on different slides, so part of what separates
+them is technical. **Harmony** adjusts the PCA embedding so that spots group by
+biology rather than by slide. Run the clustering below BOTH ways and compare:
+if clusters split perfectly by sample_id on "pca", that split is batch.
 
+```{r}
 se <- harmony::RunHarmony(se, group.by.vars = "sample_id",
                           reduction = "pca", reduction.save = "harmony")
-
-reduction_use <- "harmony"    # switch to "pca" to see the uncorrected version
-dims_use      <- 1:20
 ```
 
 
+### 7.1 Clustering - uncorrected
+
 ```{r}
-## 7. Clustering ------------------------------------------------------------
+reduction_use <- "pca"
+dims_use      <- 1:20
+
 se <- FindNeighbors(se, reduction = reduction_use, dims = dims_use)
 se <- FindClusters(se, algorithm = 1, resolution = 0.8)
 se <- RunUMAP(se, reduction = reduction_use, dims = dims_use, seed.use = 42)
@@ -759,9 +838,42 @@ DimPlot(se, reduction = "umap", group.by = "seurat_clusters") |
 MapLabels(se, column_name = "seurat_clusters", pt_size = 1.5)
 ```
 
+We can see that here, spots tend to cluster by their respective origins (the 
+section they come from), rather than by their biological similarity
+
+
+### 7.2 Clustering - corrected
+
+So now we will cluster on top of the corrected PCA representation after
+Harmony.
 
 ```{r}
-## 8. Cluster markers -------------------------------------------------------
+reduction_use <- "harmony"
+dims_use      <- 1:20
+
+se <- FindNeighbors(se, reduction = reduction_use, dims = dims_use)
+se <- FindClusters(se, algorithm = 1, resolution = 0.8)
+se <- RunUMAP(se, reduction = reduction_use, dims = dims_use, seed.use = 42)
+
+DimPlot(se, reduction = "umap", group.by = "seurat_clusters") |
+  DimPlot(se, reduction = "umap", group.by = "sample_id")
+
+MapLabels(se, column_name = "seurat_clusters", pt_size = 1.5)
+```
+
+We can observe that now, spots from the different section group better by
+anatomical and molecular similarity, rather than their origin. These steps
+are art, and rather project/question dependent. Over correcting, and one
+loses the information that separate 1 section to the other. Under correcting,
+and one end up retrieving all the technical/batch noise. 
+(`Harmony`)[https://www.nature.com/articles/s41592-019-0619-0] provides
+a range of parameters worth checking the day you need to use such batch effect
+correction.
+
+
+### 8. Cluster markers
+
+```{r}
 se <- SetIdent(se, value = "seurat_clusters")
 
 detable <- FindAllMarkers(se,
@@ -791,12 +903,110 @@ DotPlot(se, features = unique(top5$gene), assay = "Spatial") +
   labs(x = "", y = "", title = "Cluster markers across 3 sections")
 ```
 
+Here, each cluster share spots coming from our 3 sections, which means that the
+markers we find in our `DEG` analysis, are markers that best describe these populations.
+This can be very useful to understand which markers drive these spots to cluster together
+and we expect to find markers that are significantly present in all sections analysed.
+
+### Questions
+1. Do we see difference with the clustering from the first part (1 section)?
+2. Why do you think we observe these differences?
+
+We can also plot a single marker on all the sections simultaneously:
 
 ```{r}
-## 9. Checkpoint ------------------------------------------------------------
-dir.create("./checkpoints", showWarnings = FALSE)
-saveRDS(se,      "./checkpoints/3sections_clustered.rds")
-saveRDS(detable, "./checkpoints/3sections_markers.rds")
+gene <- "MYH6"
 
-# se <- readRDS("./checkpoints/3sections_clustered.rds")
+p <- MapFeatures(
+  object = se,
+  features = gene,
+  ncol = 3
+)
+```
+
+### 9. Checkpoint
+When analysis get long, it is common practice to save the status of our object.
+Many results such as plots and tables can be saved along the way too.
+Here we will simply see how it is done, but in order to not clutter the server
+at our disposal, we will not save it.
+
+```{r}
+#| eval = FALSE
+
+# dir.create("./checkpoints", showWarnings = FALSE)         # create a directory to save results
+# saveRDS(se,      "./checkpoints/3sections_clustered.rds") # save the 3 sections object 
+# saveRDS(detable, "./checkpoints/3sections_markers.rds")   # save the detable
+
+# se <- readRDS("./checkpoints/3sections_clustered.rds")    # load the saved object, when we want to continue working on the project
+```
+
+
+## Advanced analysis
+
+### 10. Temporal DEG
+
+We just did a `DEG` analysis on the 3 sections together, but an information we do not know yet is what markers are specific `per clusters` **AND** `time point`. 
+For that we need to subset each clusters per time points (e.g., `cluster_1_age_1`, `cluster_1_age_2`, etc.) and specify to the `FindAllMarkers()` function to look at each of
+these subcategories individually.
+
+Let's try it out:
+
+#### 1. Create the age dependent clusters group as a new metadata column
+
+```{r}
+# Extract unique cluster numbers and ages as sorted numeric vectors
+clusters <- sort(as.numeric(unique(as.character(se$seurat_clusters))))
+ages     <- sort(as.numeric(unique(as.character(se$pcw_age))))
+
+# Build all combinations in numeric order (Cluster primary, Age secondary)
+grid <- expand.grid(age = ages, cluster = clusters)
+ordered_levels <- paste0(grid$cluster, "_age_", grid$age)
+
+# Create the string column
+raw_values <- paste0(se$seurat_clusters, "_age_", se$pcw_age)
+
+# Convert to a factor using only the levels actually present in your data
+se$seurat_clusters_age <- factor(
+  raw_values, 
+  levels = intersect(ordered_levels, raw_values)
+)
+
+levels(se$seurat_clusters_age)
+```
+
+
+#### 2. Use this new category to compute DEG
+
+```{r}
+# Specify which metadata column to use
+se <- SetIdent(se, value = "seurat_clusters_age")
+
+# Compute the DEG
+detable <- FindAllMarkers(se,
+                          only.pos = TRUE,
+                          max.cells.per.ident = 300,
+                          logfc.threshold = 0.1,
+                          assay = "Spatial",
+                          test.use = "wilcox",
+                          min.pct = 0.05)
+
+# Filter the results table by significance
+detable <- detable |>
+  filter(p_val_adj < 0.05) |>
+  mutate(pct.diff = pct.1 - pct.2)
+
+# slice_* rather than top_n: p_val_adj has many exact ties at 0
+top2 <- detable |>
+  group_by(cluster) |>
+  slice_min(p_val_adj, n = 10, with_ties = FALSE) |>
+  slice_max(pct.diff,  n = 5, with_ties = FALSE) |>
+  slice_max(avg_log2FC, n = 2, with_ties = FALSE) |>
+  ungroup()
+
+# Plot top2 markers per category
+DotPlot(se, features = unique(top2$gene), assay = "Spatial") +
+  coord_flip() +
+  scale_color_gradientn(colours = rev(RColorBrewer::brewer.pal(11, "RdBu"))) +
+  scale_x_discrete(limits = rev) +
+  labs(x = "", y = "", title = "Cluster markers across 3 sections")
 ```
