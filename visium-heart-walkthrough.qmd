@@ -38,6 +38,39 @@ Two consequences shape everything that follows.
 
 ![Poly-A capture on the Visium array](./data/img/10x_visium_poly_A.jpeg)
 
+
+### Where this data comes from
+
+The sections we analyse today are a small subset of a published atlas of the
+developing human heart, produced in our lab:
+
+> Lázár, E.\*, Mauron, R.\*, Andrusivová, Ž.\* et al. Spatiotemporal gene
+> expression and cellular dynamics of the developing human heart.
+> *Nature Genetics* **57**, 2756–2771 (2025).
+> [doi:10.1038/s41588-025-02352-6](https://doi.org/10.1038/s41588-025-02352-6)
+> (\*equal contribution)
+
+The full study combined Visium spatial transcriptomics on 16 hearts (38 sections,
+69,114 spots, PCW 6–12) with single-cell RNA-seq on 15 hearts (76,991 cells,
+PCW 5.5–14) and in situ sequencing of 150 transcripts. Unsupervised clustering of
+25,208 spots from 17 sections yielded 23 spatial clusters corresponding to the
+major structural components of the developing heart, and deconvolution against the
+single-cell data mapped 72 fine-grained cell states onto tissue positions.
+
+Today we work with three sections. Everything we do is a simplified version of the
+first steps of that pipeline.
+
+**Resources you can use during and after the workshop:**
+
+- Interactive viewer: <https://hdcaheart.serve.scilifelab.se>
+- Full analysis code: <https://github.com/rmauron/HDCA_heart_dev>
+- Processed data (Mendeley): <https://doi.org/10.17632/fhtb99mdzd.1>
+  and <https://doi.org/10.17632/w65jtfsvpr.1>
+
+The tissue was donated after elective medical abortion with written informed
+consent, under Swedish ethical permit 2018/769-31.
+
+
 ### By the end of the session you will have
 
 - Loaded a Visium section into R and plotted a gene on the tissue
@@ -49,7 +82,7 @@ Two consequences shape everything that follows.
 ### Practical notes
 
 Grey boxes are **code chunks**. Run the chunk your cursor is in with 
-`Cmd/Ctrl + Shift +Enter`, or a single line with `Cmd/Ctrl + Enter`. 
+`Cmd/Ctrl + Shift + Enter`, or a single line with `Cmd/Ctrl + Enter`. 
 Run them in order, top to bottom; several steps overwrite `object` with 
 an updated version, so skipping one will produce confusing
 errors later. Red text in the console is not always an error; warnings are common and
@@ -168,17 +201,67 @@ object
 
 `Hint`: look at the printed object!
 
-At this stage, we can already use and visualize the data, for instance plotting a gene:
+
+### What are we actually looking at?
+
+Before we touch the data, it is worth spending two minutes on the tissue. Everything we do
+from here on produces coloured dots on this image, and those dots only mean something if
+you know what is underneath them.
+
+This section is a PCW **10** human heart, cryosectioned at 10 µm. At this stage the four
+chambers are formed and the heart is growing and maturing rather than being built from
+scratch. Depending on the cutting plane you should be able to make out:
+
+- **Compact myocardium** — the dense outer wall of the ventricles
+- **Trabeculated myocardium** — the sponge-like inner ventricular wall, with deep recesses
+  opening into the lumen
+- **Atrial wall** — thinner, smoother, above the atrioventricular plane
+- **Interventricular septum** — the wall between the two ventricles
+- **Valve region / endocardial cushions** — pale, loosely packed mesenchyme at the
+  atrioventricular plane
+- **Chamber lumens** — empty space, often full of blood
+- **Epicardium** — the thin layer at the outer surface
+
+```{r}
+#| fig-height: 6
+ImagePlot(object)
+```
+
+Two features of this image will explain a lot of what we see later. The lumens are holes:
+there is no tissue there, so spots covering them capture very little RNA. And the wall
+thickness varies enormously across the section, so the amount of tissue under a 55 µm spot
+is far from constant. Neither is a technical problem — both are anatomy — but both show up
+in every quality metric we are about to plot.
+
+We can start orienting ourselves molecularly straight away. *MYH6* and *MYH7* are the atrial
+and ventricular myosin heavy chains, so plotting them together separates the upper and lower
+halves of the heart:
 
 ```{r}
 MapFeatures(
-  object = object,
-  slot = "counts",
-  features = "MYH6", # <-- place to enter a gene name
-  pt_size = 3,
+  object    = object,
+  slot      = "counts",
+  features  = c("MYH6", "MYH7"),
+  pt_size   = 3,
   image_use = "raw"
 )
 ```
+
+### Question
+
+1. Which regions light up for *MYH6*, and which for *MYH7*? Does that match where you
+   expected the atria and ventricles to be?
+2. Find a region where neither is expressed. What is there instead?
+3. Try `TNNT2` (all cardiomyocytes), `COL1A1` (mesenchyme and valves) or `PECAM1`
+   (endothelium and endocardium). Where does each sit?
+
+::: {.callout-tip}
+## Keep this image in mind
+When we cluster the spots later, come back to this section. Clusters that trace a
+recognisable structure are believable. Clusters that scatter across unrelated regions
+usually reflect a technical gradient rather than biology.
+:::
+
 
 ### Cleaning up a bit...
 
@@ -319,7 +402,7 @@ p <- p1 | p2
 p
 ```
 
-We could decide to remove all spots that have less than a certain number of genes since the section we analyse could have holes or empty regions.
+We could decide to remove all spots that have less than a certain number of counts since the section we analyse could have holes or empty regions.
 
 We would do it by running:
 
@@ -665,23 +748,104 @@ plts <- DotPlot(object, features = unique(top5 |> pull(gene)), assay = "Spatial"
 plts
 ```
 
-## Self exploration
 
-1.  Among the genes from the list, do you recognize some genes?
-2.  Are all the genes specific to their clusters?
+## Comparing our clusters with the published atlas
+
+Our clustering came from one section, ~2,200 spots, default parameters, and about
+20 minutes of work. The published atlas clustered 25,208 spots from 17 sections and
+resolved 23 spatial clusters covering the major structural components of the developing
+heart. Comparing the two is a good way to calibrate what a quick analysis can and cannot
+recover.
+
+Below is a small set of markers for structures the atlas resolved. This is a teaching
+subset — the complete per-cluster marker tables are in Supplementary Table 1 of the paper.
 
 ```{r}
-top2 <- top5 |>
-  group_by(cluster) |>
-  slice_min(p_val_adj, n = 2, with_ties = FALSE)
+reference_markers <- list(
+  "Atrial myocardium"        = c("MYH6", "NR2F2"),
+  "Ventricular myocardium"   = c("MYH7", "IRX4", "MYL2"),
+  "Trabecular myocardium"    = c("NPPA", "BMP10"),
+  "Cardiomyocyte (general)"  = c("TNNT2", "ACTC1", "TTN"),
+  "Endocardium / endothelium"= c("PECAM1", "NPR3", "CDH5"),
+  "Valve mesenchyme"         = c("POSTN", "COL1A1", "PENK"),
+  "Epicardium"               = c("WT1", "UPK3B", "TBX18"),
+  "Conduction system"        = c("SHOX2", "TBX3", "HCN4"),
+  "Neural / autonomic"       = c("PRPH", "STMN2", "SOX10"),
+  "Proliferating"            = c("MKI67", "TOP2A")
+)
 
-MapFeatures(object = object,
-            features = unique(top2$gene),
-            ncol = 6)
+# keep only what survived our filtering
+reference_markers <- lapply(reference_markers, intersect, y = rownames(object))
+reference_markers <- reference_markers[lengths(reference_markers) > 0]
+
+DotPlot(object,
+        features = reference_markers,
+        assay    = "Spatial") +
+  scale_color_gradientn(colours = rev(RColorBrewer::brewer.pal(11, "RdBu"))) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        strip.text  = element_text(angle = 45, size = 7)) +
+  labs(x = "", y = "cluster", title = "Our clusters against published structural markers")
 ```
 
+Passing a named list to `DotPlot()` groups the genes by structure, so each block of columns
+is one candidate identity. A cluster with a strong, isolated block is straightforward to
+name. A cluster with moderate signal in several blocks is probably a mixture — which is
+expected, since a 55 µm spot rarely contains only one cell type.
 
+Now try annotating. Fill in your best guess for each cluster:
 
+```{r}
+# Edit the labels, then run. Use NA where you are unsure.
+annotation <- c(
+  "0" = "?",
+  "1" = "?",
+  "2" = "?",
+  "3" = "?",
+  "4" = "?",
+  "5" = "?",
+  "6" = "?",
+  "7" = "?",
+  "8" = "?",
+  "9" = "?"
+)
+
+object$manual_annotation <- annotation[as.character(object$seurat_clusters)]
+MapLabels(object, column_name = "manual_annotation")
+```
+
+### Question
+
+1. Which structures from the list could you assign confidently? Which not at all?
+2. The atlas resolved 23 spatial clusters. How many did we get, and what would you change
+   to get closer?
+3. Several of the missing structures — the sinoatrial and atrioventricular nodes, the
+   chromaffin cells, the distinct valve endothelial populations on either side of a leaflet
+   — occupy very few spots. Why would a single section at this resolution struggle to find
+   them?
+4. Look up one of your clusters' top markers in the interactive viewer
+   (<https://hdcaheart.serve.scilifelab.se>). Does its spatial pattern in the full atlas
+   agree with what you see here?
+
+::: {.callout-note collapse="true"}
+## Why our result is not the published one, and that is fine
+
+Three reasons, all worth internalising.
+
+**Statistical power.** Rare structures need spots. The conduction system occupies a tiny
+fraction of any section, so with ~2,200 spots there may be only a handful of spots covering
+the sinoatrial node — not enough to form their own cluster at any resolution.
+
+**Sampling.** Whether a structure appears at all depends on the cutting plane. The atlas
+selected 17 sections that each contained at least three chambers; ours is whatever we were
+given.
+
+**Resolution and parameters.** We used `resolution = 1` and 20 principal components
+without examining alternatives. Try `resolution = 0.4` and `1.5` and watch structures merge
+and split. There is no correct value — there is a value appropriate to the question.
+
+None of this makes our clustering wrong. It makes it *coarse*, and knowing which of your
+results are robust to these choices is most of the skill in this kind of analysis.
+:::
 
 
 
@@ -742,6 +906,29 @@ se <- LoadImages(se, image_height = 400)
 We repeat the 2 filtering steps we did earlier.
 Removing the MT, HB, RP and MALAT1, and annotating the genes in order to
 keep only the protein coding genes.
+
+But first, let's take advantage of some transcript to identify the sex of 
+each section:
+
+```{r}
+sex_genes <- c("XIST", "RPS4Y1", "DDX3Y", "UTY", "EIF1AY", "KDM5D")
+FetchData(se, layer = "counts", vars = intersect(sex_genes, rownames(se))) |>
+  mutate(sample_id = se$sample_id) |>
+  group_by(sample_id) |>
+  summarise(across(everything(), mean))
+```
+
+
+### Question
+1. Does it correspond to what is reported from the metadata?
+
+
+```{r}
+infoTable$sex
+```
+
+
+Now we can proceed with our filtering:
 
 ```{r}
 pattern <- paste0(
@@ -909,7 +1096,7 @@ groups) that are worth reading about the day you need this on your own data.
 ### 8. Cluster markers
 
 ```{r}
-se <- SetIdent(se, value = "seurat_clusters")
+se <- SetIdent(se, value = "clusters_harmony")
 
 detable <- FindAllMarkers(se,
                           only.pos = TRUE,
@@ -938,7 +1125,7 @@ DotPlot(se, features = unique(top5$gene), assay = "Spatial") +
   labs(x = "", y = "", title = "Cluster markers across 3 sections")
 ```
 
-Here, each cluster share spots coming from our 3 sections, which means that the
+Here, each cluster shares spots coming from our 3 sections, which means that the
 markers we find in our `DEG` analysis, are markers that best describe these populations.
 This can be very useful to understand which markers drive these spots to cluster together
 and we expect to find markers that are significantly present in all sections analysed.
@@ -982,67 +1169,121 @@ at our disposal, we will not save it.
 ### 10. Temporal DEG
 
 We just did a `DEG` analysis on the 3 sections together, but an information we do not know yet is what markers are specific `per clusters` **AND** `time point`. 
-For that we need to subset each clusters per time points (e.g., `cluster_1_age_1`, `cluster_1_age_2`, etc.) and specify to the `FindAllMarkers()` function to look at each of
-these subcategories individually.
+For that we need to subset each clusters per time points individually and repeat `FindAllMarkers()` function to look at each of
+the time point separately.
 
 Let's try it out:
 
-#### 1. Create the age dependent clusters group as a new metadata column
+#### 1. Select cluster of choice to split per time point
 
 ```{r}
-# Extract unique cluster numbers and ages as sorted numeric vectors
-clusters <- sort(as.numeric(unique(as.character(se$seurat_clusters))))
-ages     <- sort(as.numeric(unique(as.character(se$pcw_age))))
+# pick a cluster that is well represented in all age
+table(se$clusters_harmony, se$pcw_age)
+```
 
-# Build all combinations in numeric order (Cluster primary, Age secondary)
-grid <- expand.grid(age = ages, cluster = clusters)
-ordered_levels <- paste0(grid$cluster, "_age_", grid$age)
+```{r}
+cl  <- "3"
 
-# Create the string column
-raw_values <- paste0(se$seurat_clusters, "_age_", se$pcw_age)
+sub <- SubsetSTData(se, spots = colnames(se)[which(se$clusters_harmony == cl)]) # subset the se object to only the spots from our cluster of choice
+sub$pcw_age <- factor(sub$pcw_age, levels = sort(unique(as.numeric(se$pcw_age)))) # to get ages in the right order
+Idents(sub) <- "pcw_age"
 
-# Convert to a factor using only the levels actually present in your data
-se$seurat_clusters_age <- factor(
-  raw_values, 
-  levels = intersect(ordered_levels, raw_values)
-)
+res <- FindAllMarkers(sub,
+                      only.pos = TRUE,
+                      max.cells.per.ident = 300,
+                      logfc.threshold = 0.1,
+                      assay = "Spatial",
+                      test.use = "wilcox",
+                      min.pct = 0.05) |>
+  filter(p_val_adj < 0.05)
 
-levels(se$seurat_clusters_age)
+res |> group_by(cluster) |> slice_max(avg_log2FC, n = 10) |> ungroup()
 ```
 
 
-#### 2. Use this new category to compute DEG
+By doing this, we isolate all the spots corresponding to a cluster of interest and ask
+"Whithin this cluster, which are the marker that differs the most accross age/section?".
+The way it is calculated is, taking the spots of the clusters of choice of 1 age (e.g. pcw 6)
+and compare it to the spots of age 2 and 3 together (e.g. pcw 9 and 10 pulled together).
+This step is repeated for all the age categories (pcw 9 against 6 & 10, and then 
+pcw 10 against 6 and 9 together).
+
+#### 2. Visualisation
 
 ```{r}
-# Specify which metadata column to use
-se <- SetIdent(se, value = "seurat_clusters_age")
+VlnPlot(sub, features = head(unique(res$gene), 6), group.by = "pcw_age", ncol = 3)
+```
 
-# Compute the DEG
-detable <- FindAllMarkers(se,
-                          only.pos = TRUE,
-                          max.cells.per.ident = 300,
-                          logfc.threshold = 0.1,
-                          assay = "Spatial",
-                          test.use = "wilcox",
-                          min.pct = 0.05)
-
-# Filter the results table by significance
-detable <- detable |>
-  filter(p_val_adj < 0.05) |>
-  mutate(pct.diff = pct.1 - pct.2)
-
-# slice_* rather than top_n: p_val_adj has many exact ties at 0
-top2 <- detable |>
-  group_by(cluster) |>
-  slice_min(p_val_adj, n = 10, with_ties = FALSE) |>
-  slice_max(pct.diff,  n = 5, with_ties = FALSE) |>
-  slice_max(avg_log2FC, n = 2, with_ties = FALSE) |>
-  ungroup()
-
+```{r}
 # Plot top2 markers per category
-DotPlot(se, features = unique(top2$gene), assay = "Spatial") +
+DotPlot(sub, features = head(unique(res$gene), 6), assay = "Spatial") +
   coord_flip() +
   scale_color_gradientn(colours = rev(RColorBrewer::brewer.pal(11, "RdBu"))) +
   scale_x_discrete(limits = rev) +
   labs(x = "", y = "", title = "Cluster markers across 3 sections")
+```
+
+
+But maybe, the actual spatial plot might be even easier
+
+```{r}
+MapFeatures(
+  object = se,
+  features = head(unique(res$gene), 6),
+  ncol = 3
+)
+```
+
+
+### 11. How to take of the spatial information bioinformatically
+
+We covered many steps until here. Many of the steps that are covered in most Visium
+data analysis. But it is important to note that most of these steps are borowed from 
+single-cell RNA seq. But we can do way more with spatial data by taking advantage of
+the spots coordinates as an actual spatial information, instead of just as a barcode.
+
+A question that often comes out is:
+
+"Does the genes I considered Variable Gene, are actually spatially specific?"
+
+A gene might have an intrisic high variability accross spots, but its expression be 
+completely scattered accross the tissue section. We can rely on some spatial 
+statistics to answer that question.
+
+```{r}
+# select the top 500 variable features
+test_features <- VariableFeatures(se)[1:500]
+
+# evaluate their spatial autocorrelation
+sp_cor <- CorSpatialFeatures(object = se, features = test_features)
+
+# genes with the most spatially structured expression
+head(sp_cor[[1]], 20)   
+
+# genes with the least spatially structured expression
+tail(sp_cor[[1]], 20)
+```
+
+
+Again, it is the best to visualize them spatially:
+
+```{r}
+positive_corr <- sp_cor[[1]]$gene[1:5]
+
+MapFeatures(
+  object = se,
+  features = positive_corr,
+  ncol = 3
+)
+```
+
+
+```{r}
+negative_corr <- tail(subset(sp_cor[[1]], !is.nan(cor))$gene, 5)
+
+MapFeatures(
+  object = se,
+  features = negative_corr,
+  ncol = 3
+)
 ```
