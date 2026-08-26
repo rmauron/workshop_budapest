@@ -1,2 +1,7 @@
 .quarto/*
 Rplots.pdf
+visium-heart-slides.qmd
+visium-heart-slides.html
+.Rprofile
+visium-heart-slides_cache
+visium-heart-slides_files
