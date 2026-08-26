@@ -128,9 +128,8 @@ R packages might be installed, but for us to be able to use them later in the an
 
 ```{r}
 #| label: load packages
+package.list <- c("tidyverse", "semla", "Seurat", "patchwork", "RColorBrewer", "harmony")
 
-package.list <- c("semla", "Seurat", "viridis", "dplyr", "ggplot2", "gtools", "patchwork",
-                  "RColorBrewer", "harmony", "tidyverse")
 invisible(lapply(package.list, function(element) {
   library(element, character.only = TRUE)
 }))
@@ -967,7 +966,8 @@ quantitative. We want to know if the genes are there (male) or not (female).
 
 
 ```{r}
-infoTable$sex
+infoTable |> 
+  select(sample_id, pcw_age, sex)
 ```
 
 
@@ -1252,7 +1252,7 @@ res <- FindAllMarkers(sub,
   filter(p_val_adj < 0.05)
 
 res <- as_tibble(res)
-res <- res |> dplyr::rename(age = cluster) |> group_by(age) |> slice_max(avg_log2FC, n = 10) |> ungroup()
+res_top <- res |> dplyr::rename(age = cluster) |> group_by(age) |> slice_max(avg_log2FC, n = 10) |> ungroup()
 ```
 
 
@@ -1266,16 +1266,19 @@ pcw 10 against 6 and 9 together).
 #### 2. Visualisation
 
 ```{r}
-top2_per_age <- res |>
+top2_per_age <- res_top |>
   group_by(age) |>
-  top_n(-2, p_val_adj)
+  slice_min(p_val_adj, n = 2, with_ties = FALSE) |>
+  ungroup()
 
-VlnPlot(sub, features = top2_per_age$gene, group.by = "pcw_age", ncol = 2)
+top_2_markers <- unique(top2_per_age$gene)
+
+VlnPlot(sub, features = top_2_markers, group.by = "pcw_age", ncol = 2)
 ```
 
 ```{r}
 # Plot top2 markers per category
-DotPlot(sub, features = top2_per_age$gene, assay = "Spatial") +
+DotPlot(sub, features = top_2_markers, assay = "Spatial") +
   coord_flip() +
   scale_color_gradientn(colours = rev(RColorBrewer::brewer.pal(11, "RdBu"))) +
   scale_x_discrete(limits = rev) +
@@ -1289,7 +1292,7 @@ Let's plot it on the 3 sections.
 ```{r}
 MapFeatures(
   object = se,
-  features = top2_per_age$gene,
+  features = top_2_markers,
   ncol = 3,
   pt_size = 0.6
 )
@@ -1425,15 +1428,15 @@ clusters of interest. Finally we understood that this is just the start, and fro
 spatially aware analyses can be performed.
 
 Due to lack of time, we have not covered deconvolution, niche analysis, pathways, spatially aware
-clustering, spatial interactions, pseudotime analyzis, and more.
+clustering, spatial interactions, pseudotime analysis, and more.
 
 For further explorations, here are some suggested resources:
 
-[semla documentation](https://spatial-research.github.io/semla/index.html)
-[Seurat documentation](https://satijalab.org/seurat/articles/spatial_vignette)
-[Deconvolution with Stereoscope](https://www.nature.com/articles/s42003-020-01247-y)
-[Spatially aware clustering with BANKSY](https://github.com/prabhakarlab/Banksy)
-[Spatial interaction](https://github.com/StatBiomed/SpatialDM)
+- [semla documentation](https://spatial-research.github.io/semla/index.html)
+- [Seurat spatial vignette](https://satijalab.org/seurat/articles/spatial_vignette)
+- [Deconvolution with Stereoscope](https://www.nature.com/articles/s42003-020-01247-y)
+- [Spatially aware clustering with BANKSY](https://github.com/prabhakarlab/Banksy)
+- [Spatial interactions with SpatialDM](https://github.com/StatBiomed/SpatialDM)
 
 
 ```{r}
