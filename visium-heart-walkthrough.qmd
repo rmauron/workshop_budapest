@@ -50,7 +50,7 @@ from, and the rest of the read tells us *which gene* it was.
 
 Two consequences shape everything that follows. 
 
-- First, a spot is a fixed position, not a cell, at 55 µm it typically covers a handful of cells, so what we measure is a local mixture. 
+- First, a spot is a fixed position, not a cell: at 55 µm it typically covers a handful of cells, so what we measure is a local mixture.
 - Second, poly-A capture is indiscriminate: any polyadenylated transcript is sequenced, whether or not we are interested in it. A large part of this workshop is deciding what to keep.
 
 ![Poly-A capture on the Visium array](./data/img/10x_visium_poly_A.jpeg)
@@ -90,20 +90,41 @@ consent, under Swedish ethical permit 2018/769-31.
 
 ### By the end of the session you will have
 
+**On a single section:**
+
 - Loaded a Visium section into R and plotted a gene on the tissue
 - Decided which genes to filter out, and justified why
 - Normalized, scaled, and reduced the data
 - Clustered the spots and mapped the clusters back onto the anatomy
-- Found the genes that define each cluster
+- Found the genes that define each cluster, and compared them against the
+  published atlas
+
+**On three sections of different ages:**
+
+- Repeated the whole pipeline on three sections at once
+- Seen what a batch effect looks like, and what correcting it costs
+- Looked for genes that change with developmental stage within a cluster
+- Asked whether a variable gene is actually spatially structured
 
 ### Practical notes
 
-Grey boxes are **code chunks**. Run the chunk your cursor is in with 
-`Cmd/Ctrl + Shift + Enter`, or a single line with `Cmd/Ctrl + Enter`. 
-Run them in order, top to bottom; several steps overwrite `object` with 
-an updated version, so skipping one will produce confusing
-errors later. Red text in the console is not always an error; warnings are common and
-usually harmless. If something breaks, say so and we will look at it together.
+Grey boxes are **code chunks**. Run the chunk your cursor is in with
+`Cmd/Ctrl + Shift + Enter`, or a single line with `Cmd/Ctrl + Enter`.
+
+Run them in order, top to bottom. Many steps deliberately overwrite an object
+with an updated version, so skipping one, or re-running an earlier one out of
+order, will produce confusing errors later. Three places to be aware of:
+
+- The single-section analysis builds up an object called `object`.
+- The three-section analysis uses a separate object called `se`. The two are
+  independent — `object` is not affected by anything in the second half.
+- In section 7 we cluster twice and `FindClusters()` writes to the same
+  `seurat_clusters` column both times. We copy the result into `clusters_pca`
+  and `clusters_harmony` so that nothing is lost, but if you re-run only part
+  of that chunk, `seurat_clusters` may not hold what you expect.
+
+Red text in the console is not always an error; warnings are common and usually
+harmless. If something breaks, say so and we will look at it together.
 
 ## Set up
 
