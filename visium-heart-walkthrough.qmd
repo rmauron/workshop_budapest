@@ -159,6 +159,7 @@ function `library()` in a loop. You could also do:
 
 ```{r}
 #| label: load packages
+
 package.list <- c("tidyverse", "semla", "Seurat", "patchwork", "RColorBrewer", "harmony")
 
 invisible(lapply(package.list, function(element) {
@@ -180,6 +181,8 @@ but otherwise you can use `set.seed()` with any number you want
 **in the code chunk where you need it**.
 
 ```{r}
+#| label: set-seed
+
 set.seed(1)
 ```
 
@@ -227,6 +230,8 @@ pixel of the image and the Visium spots
 and the spots in the right scale.
 
 ```{r}
+#| label: load-1-visium
+
 data_root_directory <- file.path("./data/spaceranger/V10F24-105_C1")
 
 samples <- Sys.glob(paths = file.path(data_root_directory, "filtered_feature_bc_matrix.h5"))
@@ -238,6 +243,8 @@ json <- Sys.glob(paths = file.path(data_root_directory, "spatial", "scalefactors
 We create a table containing all these paths
 
 ```{r}
+#| label: infoTable
+
 infoTable <- tibble(samples,
                     imgs,
                     spotfiles,
@@ -247,6 +254,8 @@ infoTable <- tibble(samples,
 We can inspect the table:
 
 ```{r}
+#| label: infoTable-print
+
 infoTable
 ```
 
@@ -259,6 +268,8 @@ are required for us to know where are the spots and to be able to later use this
 information in analyses and visualization.
 
 ```{r}
+#| label: ReadVisiumData
+
 object <- ReadVisiumData(infoTable)
 object <- LoadImages(object) #we specify semla to load the image in the object
 ```
@@ -266,10 +277,13 @@ object <- LoadImages(object) #we specify semla to load the image in the object
 Let's inspect what we have so far.
 
 ```{r}
+#| label: object
+
 object
 ```
 
-### Question:
+::: {.callout-tip icon=false}
+## Question
 
 1.  What is the dimension of the data?
 2.  How many spots does that section contain?
@@ -277,6 +291,26 @@ object
 4.  Does it make sense?
 
 `Hint`: look at the printed object!
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+The print-out gives `features x samples`, i.e. **genes x spots**.
+
+```{r}
+#| label: answer-object-dim
+
+dim(object)      # genes, spots
+nrow(object)     # genes
+ncol(object)     # spots
+```
+
+About 36,600 genes for roughly 2,200 spots. That gene count is close to *twice*
+the ~19,000 human protein-coding genes, which is expected: poly-A capture also
+picks up lncRNAs, pseudogenes, mitochondrial transcripts and antisense
+transcripts. We deal with that in the next section.
+:::
 
 
 ### What are we actually looking at?
@@ -300,7 +334,9 @@ recesses opening into the lumen
 - **Epicardium** — the thin layer at the outer surface
 
 ```{r}
+#| label: print-HE
 #| fig-height: 4
+
 ImagePlot(object)
 ```
 
@@ -315,7 +351,9 @@ and ventricular myosin heavy chains, so plotting them together separates the upp
 halves of the heart:
 
 ```{r}
+#| label: MapFeatures
 #| fig-height: 6
+
 MapFeatures(
   object    = object,
   slot      = "counts",
@@ -325,13 +363,44 @@ MapFeatures(
 )
 ```
 
-### Question
+::: {.callout-tip icon=false}
+## Question
 
 1. Which regions light up for *MYH6*, and which for *MYH7*? Does that match where you
    expected the atria and ventricles to be?
 2. Find a region where neither is expressed. What is there instead?
 3. Try `TNNT2` (all cardiomyocytes), `COL1A1` (mesenchyme and valves) or `PECAM1`
    (endothelium and endocardium). Where does each sit?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+1. *MYH6* marks the **atria**, *MYH7* the **ventricles** (strongest in the compact
+   myocardium). They are largely mutually exclusive, which we can check numerically
+   rather than by eye:
+
+```{r}
+#| label: answer-myh6-myh7
+
+d <- FetchData(object, vars = c("MYH6", "MYH7"), layer = "counts")
+cor(d$MYH6, d$MYH7, method = "spearman")   # negative = complementary domains
+```
+
+2. Spots with neither are **not myocardium**: chamber lumens (little tissue at all),
+   valve mesenchyme, and the epicardial surface.
+
+3. *TNNT2* covers all myocardium (atria *and* ventricles), *COL1A1* picks out the valve
+   region and mesenchyme, *PECAM1* traces endocardium and vessels — a thin outline
+   rather than a solid block.
+
+```{r}
+#| label: answer-other-markers
+
+MapFeatures(object, features = c("TNNT2", "COL1A1", "PECAM1"),
+            slot = "counts", pt_size = 1, ncol = 3)
+```
+:::
 
 ::: {.callout-tip}
 ## Keep this image in mind
@@ -363,6 +432,8 @@ In *R*, we can use simple `regular expression` or called `regex`(text patterns
 that match) to retrieve these genes:
 
 ```{r}
+#| label: gene-filtering
+
 pattern <- paste0(
   "^MT-",                      # 13 mitochondrial genes: MT-ND*, MT-CO*, MT-ATP*, MT-CYB
   "|^HB[ABDEGMQZ][0-9]?$",     # HBA1/2, HBB, HBD, HBE1, HBG1/2, HBM, HBQ1, HBZ — not HBEGF, HBP1, HBS1L
@@ -386,13 +457,38 @@ We can get a list of all the other genes (the ones we want to keep), and see the
 difference compared to the original object.
 
 ```{r}
+#| label: genes_to_keep
+
 genes_to_keep <- setdiff(rownames(object), undesirable_genes)
 length(rownames(object)) - length(genes_to_keep)
 ```
 
-### Question:
+::: {.callout-tip icon=false}
+## Question
 
 1.  How many genes have we identified for removal so far?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+```{r}
+#| label: answer-undesirable-count
+
+length(undesirable_genes)                    # total flagged
+table(sub("^(MT-|HB|RP|MALAT1).*", "\\1", undesirable_genes))   # by family
+```
+
+110 genes: 13 mitochondrial, 10 hemoglobin, ~86 ribosomal proteins and MALAT1.
+A small number of genes, but a large share of the counts:
+
+```{r}
+#| label: answer-undesirable-fraction
+
+sum(LayerData(object, "counts")[undesirable_genes, ]) /
+  sum(LayerData(object, "counts"))           # fraction of all counts removed
+```
+:::
 
 Now we can proceed with a first filtering. We want to remove the undesirable genes, 
 meaning we want to keep only all the other genes. We use the function `SubsetSTData()` 
@@ -400,6 +496,8 @@ from the *semla* package, which ensure that the spatial information is also modi
 correctly.
 
 ```{r}
+#| label: gene-filtering-subset
+
 object <- SubsetSTData(object, features = genes_to_keep)
 object
 ```
@@ -425,6 +523,7 @@ see what has been done from the complete reference to get the file we will use n
 
 ```{r}
 #| eval: false
+#| label: prepare-ref-genome
 
 # package that help us load large files
 library(rtracklayer)
@@ -448,6 +547,8 @@ saveRDS(annot, "./data/GRCh38-2020-A_gene_biotypes.rds")
 Here we load the lighter version of the reference genome:
 
 ```{r}
+#| label: load-ref-genome
+
 annot <- readRDS("./data/GRCh38-2020-A_gene_biotypes.rds")
 head(annot)
 unique(annot$gene_type)
@@ -458,6 +559,8 @@ coding genes. This step is project dependent, in other cases you might want to
 also keep the long-non-coding RNA or any types of immunoglobulin transcripts.
 
 ```{r}
+#| label: gene-filtering-ref-genome
+
 # subset the reference genes to only the protein coding genes
 annot_protein_coding <- subset(annot, gene_type == "protein_coding")
 
@@ -476,10 +579,27 @@ object
 
 We can now see that our object size significantly decreased.
 
-### Question:
+::: {.callout-tip icon=false}
+## Question
 
 1.  What is the dimension of the data now?
 2.  How many genes are we going to work with now?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+```{r}
+#| label: answer-dim-after-filtering
+
+dim(object)     # genes, spots
+ncol(object)    # spots: unchanged, we only ever filtered genes
+```
+
+Roughly 19,300 genes remain, down from 36,600. **The number of spots has not
+changed** — we removed genes, never spots. That is deliberate, and the next
+section explains why.
+:::
 
 ### Some QC plots
 
@@ -487,6 +607,8 @@ We now cleaned the genes that we are not interested in. We can now analyse the
 distributions of these genes with the commonly used histograms, but also spatially.
 
 ```{r}
+#| label: metadata
+
 # check within the object more in details, we see the metadata
 head(object@meta.data)
 ```
@@ -495,7 +617,9 @@ head(object@meta.data)
 - `nCount_Spatial` = total number of counts (a genes can be present multiple times)
 
 ```{r}
+#| label: QC-nCount_Spatial
 #| fig-height: 6
+
 p1 <- ggplot(object@meta.data, aes(nCount_Spatial)) + geom_histogram()
 p2 <- MapFeatures(object = object, features = "nCount_Spatial", slot = "counts", pt_size = 1)
 
@@ -509,7 +633,9 @@ since the section we analyse could have holes or empty regions.
 We would do it by running:
 
 ```{r}
+#| label: QC-nCount_Spatial-threshold
 #| fig-height: 6
+
 # Define thresholds for each subset object (adjust the values as needed)
 threshold <- 2000
 
@@ -534,6 +660,8 @@ contains exactly 0 count. That would produces `NaN` in some function, then break
 Check:
 
 ```{r}
+#| label: QC-metadata-check
+
 sum(object$nCount_Spatial == 0) # check that no spots have 0 counts
 all(object$nCount_Spatial == colSums(LayerData(object, "counts"))) # check that the metadata is the same data as the layer counts
 ```
@@ -569,12 +697,16 @@ Formula:
 normalized count = log1p(count / total_counts × 10000)
 
 ```{r}
+#| label: NormalizeData
+
 object_norm <- NormalizeData(object = object)
 ```
 
 ```{r}
+#| label: NormalizeData-plot
 #| fig-height: 9
 #| fig-width: 9
+
 gene <- "MYH6"
 
 p1 <- ggplot(data.frame(x = LayerData(object, "counts")[gene, ]), aes(x)) +
@@ -619,6 +751,7 @@ the log(variance) and the log(mean) using the local polynomial regression (loess
 per gene.
 
 ```{r}
+#| label: FindVariableFeatures
 #| fig-height: 4
 
 # Find the top 3000 variable features
@@ -657,6 +790,8 @@ positive values and some are negative. This scaled data is used mainly when we
 want to further reduce dimension using PCA.
 
 ```{r}
+#| label: ScaleData
+
 # let's assign the scaled data again to our variable called object. We will then have all the layers on the same object.
 object <- ScaleData(object = object_norm)
 ```
@@ -664,19 +799,45 @@ object <- ScaleData(object = object_norm)
 Now we can inspect the `object` again:
 
 ```{r}
+#| label: print-object-2
+
 object
 ```
 
-### Question:
+::: {.callout-tip icon=false}
+## Question
 
 1.  How many layers of data do we have in our object now?
 2.  Which ones?
 3.  What each of these layers correspond to?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+```{r}
+#| label: answer-layers
+
+Layers(object)
+sapply(Layers(object), function(l) dim(LayerData(object, layer = l)))
+```
+
+Three layers:
+
+- `counts` — the raw UMI counts, untouched
+- `data` — `NormalizeData()`: corrected **per spot** for sequencing depth
+- `scale.data` — `ScaleData()`: z-scored **per gene**
+
+Note the dimensions differ. `scale.data` holds only the 3,000 variable features,
+which is why asking for a non-variable gene from that layer returns an error.
+:::
 
 That is all the transformation that we will perform on our data. Let's visualize 
 how different the same gene can look on the different layers;
 
 ```{r}
+#| label: print-counts-scale-data
+
 p1 <- MapFeatures(object = object,
                   features = "MYH6",
                   slot = "counts") &
@@ -729,12 +890,16 @@ The `RunPCA()` function from `Seurat` allows us to do this easily. The function
 will use the `scale.data` layer under the hood, and use only the top 3000 genes.
 
 ```{r}
+#| label: RunPCA
+
 object <- RunPCA(object)
 ```
 
 ```{r}
+#| label: ElbowPlot
 #| fig-height: 4
 #| fig-width: 6
+
 p <- ElbowPlot(object = object,
                ndims = 50,
                reduction = "pca",
@@ -750,6 +915,8 @@ Neighbor (SNN) graph. In that example, we decide to take the first 20 principal
 components.
 
 ```{r}
+#| label: FindNeighbors
+
 object <- FindNeighbors(object = object, reduction = "pca", dims = 1:20)
 ```
 
@@ -760,6 +927,8 @@ Partition the SNN graph into distinct groups using community detection algorithm
 the `FindClusters()` function.
 
 ```{r}
+#| label: FindClusters
+
 object <- FindClusters(object = object, 
                        algorithm = 1, #1 = original Louvain algorithm
                        resolution = 1) #higher number gets more clusters
@@ -776,6 +945,8 @@ It shrinks complex information with many variables down into a simple 2D or 3D
 picture."
 
 ```{r}
+#| label: RunUMAP
+
 object <- RunUMAP(object = object,
                   reduction = "pca",
                   dims = 1:20,
@@ -788,8 +959,10 @@ specify the `metadata` column that contains the label of our clusters. In that
 case, we use the column called `seurat_clusters`.
 
 ```{r}
+#| label: UMAP
 #| fig-width: 8
 #| fig-height: 5
+
 p1 <- DimPlot(object = object, 
              reduction = "umap", 
              group.by = "seurat_clusters") &
@@ -803,22 +976,27 @@ Overlay cluster colors directly onto the histology image to verify anatomical
 alignment.
 
 ```{r}
+#| label: UMAP-section
+#| fig-height: 6
+
 p2 <- MapLabels(object = object,
                column_name = "seurat_clusters",
-               pt_size = 1)
+               pt_size = 1.5)
 p2
 ```
 
 It might be easier to visualize them side-by-side
 
 ```{r}
+#| label: UMAP-section-together
 #| fig-height: 8
+
 p1 <- DimPlot(object = object, 
              reduction = "umap", 
              group.by = "seurat_clusters")
 p2 <- MapLabels(object = object,
                column_name = "seurat_clusters",
-               pt_size = 2)
+               pt_size = 1)
 
 p <- p1 | p2
 p
@@ -838,6 +1016,8 @@ The function accounts for the multiple testing. After running the test, we will
 explore quickly its results.
 
 ```{r}
+#| label: FindAllMarkers
+
 # Set identity to the clustering column corresponding to the current resolution
 object <- SetIdent(object, value = "seurat_clusters")
   
@@ -868,19 +1048,45 @@ We hope to find some of these:
 - PECAM1          endothelium
 
 ```{r}
-gene_to_look_up <- "NPPA"
+#| label: gene_to_look_up
 
+gene_to_look_up <- "NPPA"
 detable |> filter(gene == gene_to_look_up)
 ```
 
 
-### Question:
+::: {.callout-tip icon=false}
+## Question
+
 1. Do you see some of these genes in the detable?
 2. What do you observe that seems odd?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+Yes — and the odd thing is that **the same gene appears in several clusters**.
+
+```{r}
+#| label: answer-detable-duplicates
+
+nrow(detable)
+detable |> count(gene, sort = TRUE) |> head(5)      # genes flagged most often
+detable |> filter(gene == "MYH6") |> select(cluster, avg_log2FC, p_val_adj)
+```
+
+`FindAllMarkers()` tests each cluster against **all others pooled**, one cluster at
+a time. A gene can therefore be significantly enriched in cluster 2 *and* cluster 5,
+as long as each is higher than the rest combined. With several clusters covering
+myocardium, *MYH6* comes out repeatedly. This is why we add `pct.diff` next: it
+rewards genes that are *specific*, not merely high.
+:::
 
 Let's find out more:
 
 ```{r}
+#| label: detable-check
+
 dim(detable)
 detable |> filter(gene == "MYH6")
 ```
@@ -894,6 +1100,8 @@ We will see in a second how we can visualize these results easily.
 But first, we want to filter these results and add some more metrics
 
 ```{r}
+#| label: detable-filter
+
 # Filter and add extra columns
 detable <- detable[detable$p_val_adj < 0.05, ] #keep only the rows that have an adjusted p-val smaller than 0.05
 detable$pct.diff <- detable$pct.1 - detable$pct.2 # add a column called "pct.diff" which is the difference in percentage 1 (%age of spots expressing that gene in cluster of interest) and percentage 2 (%age of spots expressing that gene in all other clusters). We can think that the largest the pct.diff, the more specific the gene is to that cluster.
@@ -903,6 +1111,8 @@ detable$log.pct.diff <- log2((detable$pct.1 * 99 + 1) / (detable$pct.2 * 99 + 1)
 Then we can select the top5 markers per clusters
 
 ```{r}
+#| label: detable-top5
+
 # Select top genes by p_val_adj, pct.diff and avg_log2FC
 top5 <- detable |> 
   group_by(cluster) |> 
@@ -916,8 +1126,10 @@ top5
 And finally visualize it
 
 ```{r}
+#| label: dotplot-top5
 #| fig-height: 12
 #| fig-width: 6
+
 # Generate a dot plot for the selected genes with a title indicating the grid info
 plts <- DotPlot(object, features = unique(top5 |> pull(gene)), assay = "Spatial") +
   coord_flip() +
@@ -944,7 +1156,10 @@ Below is a small set of markers for structures the atlas resolved. This is a tea
 subset — the complete per-cluster marker tables are in Supplementary Table 1 of the paper.
 
 ```{r}
+#| label: dotplot-annotation
 #| fig-width: 12
+#| fig-height: 10
+
 reference_markers <- list(
   "Atrial myocardium"        = c("MYH6", "NR2F2"),
   "Ventricular myocardium"   = c("MYH7", "IRX4", "MYL2"),
@@ -1001,7 +1216,9 @@ one cell type.
 Now try annotating. Fill in your best guess for each cluster:
 
 ```{r}
-#| fig-height: 5
+#| label: map-annotation
+#| fig-height: 6
+
 # Edit the labels, then run. Use NA where you are unsure.
 annotation <- c(
   "0" = "?",
@@ -1017,10 +1234,11 @@ annotation <- c(
 )
 
 object$manual_annotation <- unname(annotation[as.character(object$seurat_clusters)])
-MapLabels(object, column_name = "manual_annotation", pt_size = 1)
+MapLabels(object, column_name = "manual_annotation", pt_size = 1.5)
 ```
 
-### Question
+::: {.callout-tip icon=false}
+## Question
 
 1. Which structures from the list could you assign confidently? Which not at all?
 2. The atlas resolved 23 spatial clusters. How many did we get, and what would you 
@@ -1032,6 +1250,41 @@ MapLabels(object, column_name = "manual_annotation", pt_size = 1)
 4. Look up one of your clusters' top markers in the interactive viewer
    (<https://hdcaheart.serve.scilifelab.se>). Does its spatial pattern in the full atlas
    agree with what you see here?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+1. The abundant structures are assignable: atrial and ventricular myocardium, valve
+   mesenchyme, epicardium, endocardium. The rare ones are not.
+
+2. How many did we get, and how big is each?
+
+```{r}
+#| label: answer-cluster-count
+
+nlevels(object$seurat_clusters)
+sort(table(object$seurat_clusters))       # spots per cluster
+```
+
+To get closer you would need more sections, more spots, and a higher `resolution`
+— but resolution alone cannot invent signal that is not there.
+
+3. Because a cluster needs spots to exist. The smallest structures cover only a
+   handful of 55 µm spots in any one section:
+
+```{r}
+#| label: answer-smallest-cluster
+
+min(table(object$seurat_clusters))        # our smallest cluster
+round(100 * min(table(object$seurat_clusters)) / ncol(object), 1)  # % of section
+```
+
+The SA node is smaller than that. Louvain has nothing to find.
+
+4. Open the viewer and compare — most abundant-structure markers will agree, which
+   is a good sign that our coarse clustering is not wrong, just incomplete.
+:::
 
 ::: {.callout-note collapse="true"}
 ## Why our result is not the published one, and that is fine
@@ -1069,6 +1322,8 @@ temporal exploration.
 ### 1. Build infoTable
 
 ```{r}
+#| label: setup-infoTable-3sect
+
 set.seed(1)
 
 # Join metadata on sample_id rather than trusting that file order matches CSV
@@ -1104,6 +1359,8 @@ This time we will call our object `se`, short for `Seurat object`.
 Note that now we are loading all the information of the 3 sections into a single object.
 
 ```{r}
+#| label: object-3sect
+
 se <- ReadVisiumData(infoTable)
 se <- LoadImages(se, image_height = 400)
 
@@ -1111,6 +1368,8 @@ se$sample_id <- factor(se$sample_id, levels = unique(se$sample_id))
 ```
 
 ```{r}
+#| label: HE-3sect
+
 ImagePlot(se, ncol = 3)
 ```
 
@@ -1124,6 +1383,8 @@ But first, let's take advantage of some transcript to identify the sex of
 each section:
 
 ```{r}
+#| label: sex-3sect
+
 sex_genes <- c("XIST", "RPS4Y1", "DDX3Y", "UTY", "EIF1AY", "KDM5D")
 FetchData(se, layer = "counts", vars = intersect(sex_genes, rownames(se))) |>
   mutate(sample_id = se$sample_id) |>
@@ -1136,11 +1397,39 @@ after filtering. Here the values are more of a qualitative measurement rather th
 quantitative. We want to know if the genes are there (male) or not (female).
 
 
-### Question
+::: {.callout-tip icon=false}
+## Question
+
 1. Does it correspond to what is reported from the metadata?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+Yes. `XIST` is high only in the female section; the Y-linked genes are present only
+in the male ones. We can make the call explicit and compare it to the metadata:
+
+```{r}
+#| label: answer-sex-call
+
+FetchData(se, layer = "counts", vars = intersect(sex_genes, rownames(se))) |>
+  mutate(sample_id = se$sample_id) |>
+  group_by(sample_id) |>
+  summarise(across(everything(), mean)) |>
+  mutate(predicted = ifelse(XIST > DDX3Y, "female", "male")) |>
+  left_join(infoTable |> select(sample_id, sex), by = "sample_id") |>
+  select(sample_id, XIST, DDX3Y, predicted, reported = sex)
+```
+
+Note that this only works **before** filtering: `XIST` is a lncRNA and would be
+removed by the protein-coding filter, and `RPS4Y1` is caught by our ribosomal
+pattern.
+:::
 
 
 ```{r}
+#| label: sex-table-3sect
+
 infoTable |> 
   select(sample_id, pcw_age, sex)
 ```
@@ -1149,6 +1438,8 @@ infoTable |>
 Now we can proceed with our filtering:
 
 ```{r}
+#| label: gene-filtering-3sect
+
 pattern <- paste0(
   "^MT-",
   "|^HB[ABDEGMQZ][0-9]?$",
@@ -1175,8 +1466,10 @@ se
 ### 4. Per-section QC
 
 ```{r}
+#| label: QC-nCount_Spatial-3sect
 #| fig-height: 8
 #| fig-width: 10
+
 p1 <- ggplot(se@meta.data, aes(nCount_Spatial, fill = sample_id)) +
   geom_histogram(bins = 50) +
   facet_wrap(~ sample_id, scales = "free_y") +
@@ -1192,8 +1485,10 @@ p
 ### 5. Processing
 
 ```{r}
+#| label: processing-3sect
 #| fig-height: 4
 #| fig-width: 6
+
 se <- NormalizeData(se)
 se <- FindVariableFeatures(se, selection.method = "vst", nfeatures = 3000)
 se <- ScaleData(se)
@@ -1210,6 +1505,8 @@ biology rather than by slide. Run the clustering below BOTH ways and compare:
 if clusters split perfectly by sample_id on "pca", that split is batch.
 
 ```{r}
+#| label: RunHarmony-3sect
+
 se <- harmony::RunHarmony(se, group.by.vars = "sample_id",
                           reduction = "pca", reduction.save = "harmony")
 ```
@@ -1223,6 +1520,8 @@ of dimensions, the algorithm, the resolution — stays identical, so any differe
 comes from the correction alone.
 
 ```{r}
+#| label: Clustering-3sect
+
 # 7.1 — clustering on the uncorrected PCA
 se <- FindNeighbors(se, reduction = "pca", dims = 1:20)
 se <- FindClusters(se, algorithm = 1, resolution = 0.8)
@@ -1249,8 +1548,10 @@ separate cleanly by `sample_id`, the dominant signal is where the spot came from
 tissue it is.
 
 ```{r}
+#| label: umap-3sect
 #| fig-width: 12
 #| fig-height: 6
+
 p1 <- DimPlot(se, reduction = "umap_pca",     group.by = "sample_id") + ggtitle("Before (PCA)")
 p2 <- DimPlot(se, reduction = "umap_harmony", group.by = "sample_id") + ggtitle("After (Harmony)")
 
@@ -1266,6 +1567,8 @@ We can also ask how the two clusterings relate. Each row is an uncorrected clust
 column a corrected one:
 
 ```{r}
+#| label: cluster-table-3sect
+
 table(se$clusters_pca, se$clusters_harmony)
 ```
 
@@ -1280,7 +1583,9 @@ make the same anatomical structure receive the same cluster label in all three
 sections.
 
 ```{r}
+#| label: clusters_pca_map-3sect
 #| fig-width: 12
+
 MapLabels(se, column_name = "clusters_pca", pt_size = 1, ncol = 3) +
   plot_layout(guides = "collect") &
   guides(fill = guide_legend(override.aes = list(size = 3), 
@@ -1289,7 +1594,9 @@ MapLabels(se, column_name = "clusters_pca", pt_size = 1, ncol = 3) +
 ```
 
 ```{r}
+#| label: clusters_harmony_map-3sect
 #| fig-width: 12
+
 MapLabels(se, column_name = "clusters_harmony", pt_size = 1, ncol = 3) +
   plot_layout(guides = "collect") &
   guides(fill = guide_legend(override.aes = list(size = 3), 
@@ -1297,12 +1604,57 @@ MapLabels(se, column_name = "clusters_harmony", pt_size = 1, ncol = 3) +
   theme(legend.position = "right")
 ```
 
-### Question
+::: {.callout-tip icon=false}
+## Question
 
 1. In the uncorrected version, do the three sections share cluster labels, or does each
    section have largely its own?
 2. Pick a structure you can identify on the H&E, for example the ventricular wall. Does it
    get the same label across sections before correction? After?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+1. Before correction, many clusters are dominated by a single section. We can count
+   them rather than squint at the UMAP — for each cluster, what share of its spots
+   comes from its most common section?
+
+```{r}
+#| label: answer-cluster-purity
+
+purity <- function(clusters, samples) {
+  tab <- table(clusters, samples)
+  round(apply(prop.table(tab, 1), 1, max), 2)
+}
+
+p_before <- purity(se$clusters_pca,     se$sample_id)
+p_after  <- purity(se$clusters_harmony, se$sample_id)
+
+c(n_clusters_before = length(p_before),
+  n_clusters_after  = length(p_after))
+
+summary(p_before)
+summary(p_after)
+```
+
+A value near 1 means "this cluster is essentially one section". Count how many
+clusters cross 90%:
+
+```{r}
+#| label: answer-cluster-purity-count
+
+c(before = sum(p_before > 0.9),
+  after  = sum(p_after  > 0.9))
+```
+
+2. After correction the ventricular wall should carry the same label in all three
+   sections. Before, it typically has one label per section — the same biology
+   split three ways by slide.
+
+Careful though: with one section per age, some of what Harmony removed is real
+developmental difference. See the limitation box below.
+:::
 
 ::: {.callout-important}
 ## An important limitation of this dataset
@@ -1311,6 +1663,8 @@ We have one section per age, so `sample_id` and `pcw_age` carry exactly the same
 information:
 
 ```{r}
+#| label: sample_id_age_table-3sect
+
 table(se$sample_id, se$pcw_age)
 ```
 
@@ -1335,8 +1689,10 @@ groups) that are worth reading about the day you need this on your own data.
 ### 8. Cluster markers
 
 ```{r}
+#| label: FindAllMarkers-3sect
 #| fig-height: 13
 #| fig-width: 8
+
 se <- SetIdent(se, value = "clusters_harmony")
 
 detable <- FindAllMarkers(se,
@@ -1371,13 +1727,51 @@ markers we find in our `DEG` analysis, are markers that best describe these popu
 This can be very useful to understand which markers drive these spots to cluster together
 and we expect to find markers that are significantly present in all sections analysed.
 
-### Questions
+::: {.callout-tip icon=false}
+## Question
+
 1. Do we see difference with the clustering from the first part (1 section)?
 2. Why do you think we observe these differences?
+:::
+
+::: {.callout-note collapse="true" icon=false}
+## Answer
+
+```{r}
+#| label: answer-1-vs-3-sections
+
+c(one_section    = nlevels(object$seurat_clusters),
+  three_sections = nlevels(se$clusters_harmony))
+
+c(spots_one   = ncol(object),
+  spots_three = ncol(se))
+```
+
+Three reasons for the difference:
+
+- **More spots** means more statistical power, so structures too small to separate
+  in one section can now form their own cluster.
+- **Three developmental stages** are pooled, so a cluster must describe a structure
+  across PCW 6 to 10 rather than at a single moment.
+- **Harmony** reshaped the embedding, and cluster numbering is arbitrary anyway —
+  cluster 3 here has nothing to do with cluster 3 in part 1.
+
+The markers are the reliable comparison, not the labels:
+
+```{r}
+#| label: answer-marker-overlap
+
+top_now <- detable |> group_by(cluster) |> slice_max(avg_log2FC, n = 10) |>
+  pull(gene) |> unique()
+length(top_now)
+```
+:::
 
 We can also plot a single marker on all the sections simultaneously:
 
 ```{r}
+#| label: MapFeatures-3sect
+
 gene <- "MYH6"
 
 p <- MapFeatures(
@@ -1395,6 +1789,7 @@ Here we will simply see how it is done, but in order to not clutter the server
 at our disposal, we will not save it.
 
 ```{r}
+#| label: saveRDS-3sect
 #| eval: false
 
 # dir.create("./checkpoints", showWarnings = FALSE)         # create a directory to save results
@@ -1419,11 +1814,15 @@ Let's try it out:
 #### 1. Select cluster of choice to split per time point
 
 ```{r}
+#| label: check-clusters-table-3sect
+
 # pick a cluster that is well represented in all age
 table(se$clusters_harmony, se$pcw_age)
 ```
 
 ```{r}
+#| label: temporal-deg-3sect
+
 cl  <- "3"
 
 sub <- SubsetSTData(se, spots = colnames(se)[which(se$clusters_harmony == cl)]) # subset the se object to only the spots from our cluster of choice
@@ -1454,8 +1853,10 @@ pcw 10 against 6 and 9 together).
 #### 2. Visualisation
 
 ```{r}
+#| label: temporal-deg-violinplot-3sect
 #| fig-height: 8
 #| fig-width: 6
+
 top2_per_age <- res_top |>
   group_by(age) |>
   slice_min(p_val_adj, n = 2, with_ties = FALSE) |>
@@ -1467,8 +1868,10 @@ VlnPlot(sub, features = top_2_markers, group.by = "pcw_age", ncol = 2)
 ```
 
 ```{r}
+#| label: temporal-deg-dotplot-3sect
 #| fig-height: 4
-#| fig-width: 4
+#| fig-width: 5
+
 # Plot top2 markers per category
 DotPlot(sub, features = top_2_markers, assay = "Spatial") +
   coord_flip() +
@@ -1482,7 +1885,9 @@ But maybe, the actual spatial plot might be even easier.
 Let's plot it on the 3 sections.
 
 ```{r}
-#| fig-height: 10
+#| label: temporal-deg-map-3sect
+#| fig-height: 12
+#| fig-width: 15
 
 MapFeatures(
   object = se,
@@ -1510,6 +1915,8 @@ completely scattered across the tissue section. We can rely on some spatial
 statistics to answer that question.
 
 ```{r}
+#| label: CorSpatialFeatures-3sect
+
 # select the top 500 variable features
 test_features <- VariableFeatures(se)[1:500]
 
@@ -1530,6 +1937,7 @@ Again, it is the best to visualize them spatially:
 #### Section 1
 
 ```{r}
+#| label: CorSpatialFeatures-1-pos-3sect
 #| fig-height: 7
 
 section_number <- 1
@@ -1546,6 +1954,7 @@ MapFeatures(
 
 
 ```{r}
+#| label: CorSpatialFeatures-1-neg-3sect
 #| fig-height: 7
 
 negative_corr <- tail(subset(sp_cor[[section_number]], !is.nan(cor))$gene, 6)
@@ -1562,6 +1971,7 @@ MapFeatures(
 #### Section 2
 
 ```{r}
+#| label: CorSpatialFeatures-2-pos-3sect
 #| fig-height: 7
 
 section_number <- 2
@@ -1578,6 +1988,7 @@ MapFeatures(
 
 
 ```{r}
+#| label: CorSpatialFeatures-2-neg-3sect
 #| fig-height: 7
 
 negative_corr <- tail(subset(sp_cor[[section_number]], !is.nan(cor))$gene, 6)
@@ -1594,6 +2005,7 @@ MapFeatures(
 #### Section 3
 
 ```{r}
+#| label: CorSpatialFeatures-3-pos-3sect
 #| fig-height: 7
 
 section_number <- 3
@@ -1610,6 +2022,7 @@ MapFeatures(
 
 
 ```{r}
+#| label: CorSpatialFeatures-3-neg-3sect
 #| fig-height: 7
 
 negative_corr <- tail(subset(sp_cor[[section_number]], !is.nan(cor))$gene, 6)
@@ -1641,12 +2054,18 @@ For further explorations, here are some suggested resources:
 
 - [semla documentation](https://spatial-research.github.io/semla/index.html)
 - [Seurat spatial vignette](https://satijalab.org/seurat/articles/spatial_vignette)
+- [Seurat guided clustering](https://satijalab.org/seurat/archive/v3.0/pbmc3k_tutorial.html)
+- [Seurat integration & label transfer](https://satijalab.org/seurat/archive/v3.2/integration.html)
+- [Single-cell QC & Clustering](https://rnabio.org/module-08-scrna/0008/02/01/QA_clustering/)
+- [NBIS detailed slides](https://nbisweden.github.io/workshop-scRNAseq/home_contents.html)
 - [Deconvolution with Stereoscope](https://www.nature.com/articles/s42003-020-01247-y)
 - [Spatially aware clustering with BANKSY](https://github.com/prabhakarlab/Banksy)
 - [Spatial interactions with SpatialDM](https://github.com/StatBiomed/SpatialDM)
 
 
 ```{r}
+#| label: sessionInfo
+
 sessionInfo()
 ```
 
